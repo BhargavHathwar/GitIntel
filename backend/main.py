@@ -41,10 +41,14 @@ class AIRequest(BaseModel):
 
 
 # ── GitHub helpers ────────────────────────────────────────────────────────────
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
 def gh_headers(token: Optional[str]) -> dict:
     h = {"Accept": "application/vnd.github.v3+json", "X-GitHub-Api-Version": "2022-11-28"}
-    if token:
-        h["Authorization"] = f"Bearer {token}"
+    # Use user-provided token first, fall back to server token
+    effective_token = token or GITHUB_TOKEN
+    if effective_token:
+        h["Authorization"] = f"Bearer {effective_token}"
     return h
 
 async def gh_get(client: httpx.AsyncClient, path: str, token: Optional[str]):

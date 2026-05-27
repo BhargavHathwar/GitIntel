@@ -448,6 +448,9 @@ function Overview({ summary, loading }) {
               ))}
             </div>
           )}
+          {!loading && !summary && (
+            <p className="text-on-surface-variant text-sm">No overview available. Try analyzing the repository again.</p>
+          )}
           {summary && <MD text={summary} streaming={loading} />}
         </div>
       </div>
@@ -833,13 +836,18 @@ Stack: ${stack.join(', ')}
 Top files: ${data.tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 40).join(', ')}
 README excerpt: ${data.readme.slice(0, 800)}`
 
-      await streamAI(
-        'You are a senior engineer. Be concise. Use markdown with **bold** headers.',
-        `Summarize this GitHub repo in 4 short sections:\n\n${shortCtx}\n\n**What it does:** (2 sentences)\n**Architecture:** (2 sentences)\n**Key features:** (3-4 bullets)\n**Code quality:** (1 sentence score)`,
-        t => setSummary(t),
-        600   // limit output tokens for speed
-      )
-      setSumLoading(false)
+      try {
+        await streamAI(
+          'You are a senior engineer. Be concise. Use markdown with **bold** headers.',
+          `Summarize this GitHub repo in 4 short sections:\n\n${shortCtx}\n\n**What it does:** (2 sentences)\n**Architecture:** (2 sentences)\n**Key features:** (3-4 bullets)\n**Code quality:** (1 sentence score)`,
+          t => setSummary(t),
+          600   // limit output tokens for speed
+        )
+      } catch (aiErr) {
+        setSummary(`**Overview generation failed**\n\nCould not generate AI summary: ${aiErr.message}\n\nThe repository data was loaded successfully. You can still use File Explorer, Search, and Chat tabs.`)
+      } finally {
+        setSumLoading(false)
+      }
       setTab('overview')
     } catch (e) {
       setError(e.message || 'Something went wrong. Check the URL and try again.')
@@ -863,7 +871,8 @@ README: ${readme.slice(0, 600)}` : ''
         `In 3 sentences, describe the architecture of:\n${shortCtx}`,
         t => setArchText(t),
         400
-      ).finally(() => setArchLoading(false))
+      ).catch(e => setArchText(`Architecture analysis failed: ${e.message}`))
+        .finally(() => setArchLoading(false))
     }
     if (tab === 'bugs' && repoMeta && !bugText && !bugLoading) {
       setBugLoading(true)
@@ -872,7 +881,8 @@ README: ${readme.slice(0, 600)}` : ''
         `Analyze this repo:\n${shortCtx}\n\n**Potential Bugs:** (2 bullets)\n**Security Concerns:** (2 bullets)\n**Code Quality:** (1-2 sentences)\n**Maintainability Score:** X/10`,
         t => setBugText(t),
         600
-      ).finally(() => setBugLoading(false))
+      ).catch(e => setBugText(`Code analysis failed: ${e.message}`))
+        .finally(() => setBugLoading(false))
     }
   }, [tab, repoMeta])
 
