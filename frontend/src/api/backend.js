@@ -1,9 +1,5 @@
-// All communication with the FastAPI backend lives here.
-// The Vite proxy forwards /api/* → http://localhost:8000/api/*
-
 const BASE = '/api'
 
-// ── Fetch repo data (meta + tree + languages + readme) ─────────────────────
 export async function fetchRepo(owner, repo, token = '') {
   const res = await fetch(`${BASE}/repo`, {
     method: 'POST',
@@ -17,45 +13,57 @@ export async function fetchRepo(owner, repo, token = '') {
   return res.json()
 }
 
-// ── Streaming AI call — calls onChunk(fullTextSoFar) on every token ─────────
-export async function streamAI(system, prompt, onChunk, maxTokens = 1200) {
+// Streaming — accumulates delta chunks and fires onChunk(fullText)
+export async function streamAI(system, prompt, onChunk, maxTokens = 1500) {
   const res = await fetch(`${BASE}/ai/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ system, prompt, max_tokens: maxTokens }),
   })
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || `AI stream error ${res.status}`)
+    throw new Error(err.detail || `Stream error ${res.status}`)
   }
 
   const reader = res.body.getReader()
-  const dec    = new TextDecoder()
-  let full     = ''
+  const dec = new TextDecoder()
+  let accumulated = ''
+  let lineBuffer = ''
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    for (const line of dec.decode(value).split('\n')) {
-      if (!line.startsWith('data: ')) continue
-      const raw = line.slice(6)
-      if (raw === '[DONE]') continue
+
+    lineBuffer += dec.decode(value, { stream: true })
+    const lines = lineBuffer.split('\n')
+    lineBuffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) continue
+      const raw = trimmed.slice(5).trim()
+      if (!raw || raw === '[DONE]') continue
+
       try {
-        const data = JSON.parse(raw)
-        if (data.error) throw new Error(data.error)
-        const delta = data?.delta?.text || ''
-        full += delta
-        onChunk?.(full)
+        const parsed = JSON.parse(raw)
+        if (parsed.error) throw new Error(parsed.error)
+        const chunk = parsed?.delta?.text ?? ''
+        if (chunk) {
+          accumulated += chunk
+          onChunk?.(accumulated)
+        }
       } catch (e) {
-        if (e.message !== 'JSON parse') throw e
+        if (e.message && !e.message.startsWith('JSON')) throw e
       }
     }
   }
-  return full
+
+  return accumulated
 }
 
-// ── Non-streaming AI (used for structured JSON responses e.g. search) ───────
-export async function completeAI(system, prompt, maxTokens = 1200) {
+// Non-streaming for structured JSON (search)
+export async function completeAI(system, prompt, maxTokens = 1500) {
   const res = await fetch(`${BASE}/ai/complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,8 +71,7 @@ export async function completeAI(system, prompt, maxTokens = 1200) {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || `AI complete error ${res.status}`)
+    throw new Error(err.detail || `Complete error ${res.status}`)
   }
-  const data = await res.json()
-  return data.text
+  return (await res.json()).text
 }

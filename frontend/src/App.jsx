@@ -1,65 +1,811 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { fetchRepo, streamAI, completeAI } from './api/backend.js'
+import { parseGitHubUrl, detectStack, buildTreeObj, buildContext, LANG_COLORS } from './utils/helpers.js'
 
-import Header       from './components/Header.jsx'
-import Landing      from './components/Landing.jsx'
-import RepoHeader   from './components/RepoHeader.jsx'
-import Overview     from './components/Overview.jsx'
-import FileTree     from './components/FileTree.jsx'
-import SemanticSearch from './components/SemanticSearch.jsx'
-import AIChat       from './components/AIChat.jsx'
-import Architecture from './components/Architecture.jsx'
-import BugAnalysis  from './components/BugAnalysis.jsx'
+// ─── Tiny shared primitives ─────────────────────────────────────────────────
 
-import { fetchRepo, streamAI } from './api/backend.js'
-import { parseGitHubUrl, detectStack, buildTreeObj, buildContext } from './utils/helpers.js'
+const Icon = ({ name, className = '', fill = false }) => (
+  <span className={`material-symbols-outlined ${fill ? 'icon-fill' : ''} ${className}`}>{name}</span>
+)
 
-const TABS = [
-  { id: 'overview',      label: 'Overview',      ic: '◈' },
-  { id: 'files',         label: 'Files',          ic: '⌂' },
-  { id: 'search',        label: 'Search',         ic: '⌕' },
-  { id: 'chat',          label: 'AI Chat',        ic: '◎' },
-  { id: 'architecture',  label: 'Architecture',   ic: '⊞' },
-  { id: 'bugs',          label: 'Analysis',       ic: '⚠' },
+const Spinner = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth={2} strokeLinecap="round"
+    style={{ animation: 'spin .8s linear infinite', flexShrink: 0 }}>
+    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+  </svg>
+)
+
+function MD({ text, streaming }) {
+  const html = (text || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, c) => `<pre><code>${c.trimEnd()}</code></pre>`)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+    .replace(/\n\n+/g, '</p><p>')
+    .replace(/\n/g, '<br/>')
+  return (
+    <div className={`md-content ${streaming ? 'typing' : ''}`}
+      dangerouslySetInnerHTML={{ __html: `<p>${html}</p>` }} />
+  )
+}
+
+// ─── Stat card ──────────────────────────────────────────────────────────────
+function StatCard({ icon, iconColor, label, value }) {
+  return (
+    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-4">
+      <span className="text-xs font-code tracking-widest text-on-surface-variant uppercase block mb-1">{label}</span>
+      <div className="flex items-center gap-2">
+        <Icon name={icon} className={`text-lg ${iconColor}`} fill />
+        <span className="font-headline text-lg font-bold text-on-surface">{value ?? '—'}</span>
+      </div>
+    </div>
+  )
+}
+
+// ─── File Tree ───────────────────────────────────────────────────────────────
+function TreeNode({ name, node, depth }) {
+  const isDir = node && typeof node === 'object'
+  const [open, setOpen] = useState(depth < 2)
+  const ext = name.split('.').pop()
+  const dot = isDir ? '#acc7ff' : (LANG_COLORS[ext] || '#8b909f')
+  return (
+    <div>
+      <div
+        onClick={() => isDir && setOpen(o => !o)}
+        className="flex items-center gap-1.5 px-2 py-0.5 rounded cursor-pointer hover:bg-surface-container-high transition-colors group"
+        style={{ paddingLeft: 8 + depth * 16 }}
+      >
+        <span className="text-xs w-3 flex-shrink-0 text-center" style={{ color: dot }}>
+          {isDir ? (open ? '▾' : '▸') : '·'}
+        </span>
+        <span className={`font-code text-xs ${isDir ? 'text-on-surface' : 'text-on-surface-variant'}`}>{name}</span>
+      </div>
+      {isDir && open && Object.entries(node)
+        .sort(([, a], [, b]) => (a === null ? 1 : 0) - (b === null ? 1 : 0))
+        .map(([k, v]) => <TreeNode key={k} name={k} node={v} depth={depth + 1} />)}
+    </div>
+  )
+}
+
+// ─── Sidebar ─────────────────────────────────────────────────────────────────
+const NAV_ITEMS = [
+  { id: 'overview',     label: 'AI Overview',   icon: 'auto_awesome' },
+  { id: 'files',        label: 'File Explorer', icon: 'folder_open' },
+  { id: 'search',       label: 'Semantic Search', icon: 'manage_search' },
+  { id: 'chat',         label: 'AI Chat',       icon: 'chat' },
+  { id: 'architecture', label: 'Architecture',  icon: 'schema' },
+  { id: 'bugs',         label: 'Code Analysis', icon: 'bug_report' },
 ]
 
-export default function App() {
-  // ── Loading / error state ──────────────────────────────────────────────────
-  const [loading,  setLoading]  = useState(false)
-  const [loadStep, setLoadStep] = useState('')
-  const [error,    setError]    = useState('')
+function Sidebar({ tab, setTab, onNew }) {
+  return (
+    <aside className="hidden lg:flex flex-col h-full w-64 bg-surface-container-low border-r border-outline-variant flex-shrink-0">
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-4 py-4 border-b border-outline-variant">
+        <div className="w-9 h-9 bg-primary-container rounded-lg flex items-center justify-center flex-shrink-0">
+          <Icon name="insights" className="text-on-primary text-xl" fill />
+        </div>
+        <div>
+          <div className="font-headline font-bold text-primary text-base leading-tight">GitIntel</div>
+          <div className="font-code text-[10px] text-on-surface-variant uppercase tracking-widest">Repo Intelligence</div>
+        </div>
+      </div>
 
-  // ── Repo data ──────────────────────────────────────────────────────────────
-  const [repoMeta,  setRepoMeta]  = useState(null)
-  const [rawTree,   setRawTree]   = useState([])
-  const [treeObj,   setTreeObj]   = useState(null)
+      {/* New repo button */}
+      <div className="px-3 py-3">
+        <button
+          onClick={onNew}
+          className="w-full py-2 px-4 bg-tertiary text-on-tertiary-container rounded-lg font-bold text-xs tracking-wide flex items-center justify-center gap-2 hover:brightness-110 transition-all"
+        >
+          <Icon name="add" className="text-base" /> Analyze New Repo
+        </button>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
+        {NAV_ITEMS.map(item => {
+          const active = tab === item.id
+          return (
+            <button
+              key={item.id}
+              onClick={() => setTab(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-xs font-code tracking-wide ${
+                active
+                  ? 'bg-secondary-container text-on-secondary-container font-bold'
+                  : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <Icon name={item.icon} className="text-xl" fill={active} />
+              {item.label}
+            </button>
+          )
+        })}
+      </nav>
+
+      {/* Bottom links */}
+      <div className="px-2 py-3 border-t border-outline-variant space-y-0.5">
+        {[['description', 'Documentation'], ['help', 'Support']].map(([icon, label]) => (
+          <button key={label} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors text-xs font-code tracking-wide">
+            <Icon name={icon} className="text-xl" />
+            {label}
+          </button>
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+// ─── TopBar ──────────────────────────────────────────────────────────────────
+function TopBar({ repoMeta, onNew, tab, setTab }) {
+  return (
+    <header className="bg-surface-container border-b border-outline-variant flex items-center justify-between px-6 h-14 flex-shrink-0 sticky top-0 z-30">
+      {/* Mobile logo */}
+      <div className="flex items-center gap-3 lg:hidden">
+        <Icon name="insights" className="text-primary text-2xl" fill />
+        <span className="font-headline font-bold text-primary text-base">GitIntel</span>
+      </div>
+
+      {/* Mobile tab selector */}
+      <div className="lg:hidden flex-1 ml-4 overflow-x-auto">
+        <div className="flex gap-1">
+          {NAV_ITEMS.map(item => (
+            <button key={item.id} onClick={() => setTab(item.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded text-xs font-code tracking-wide transition-colors ${tab === item.id ? 'bg-secondary-container text-on-secondary-container' : 'text-on-surface-variant hover:text-on-surface'}`}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Right side */}
+      <div className="flex items-center gap-2 ml-4">
+        {repoMeta && (
+          <span className="hidden md:flex items-center gap-1.5 font-code text-xs text-on-surface-variant">
+            <Icon name="folder" className="text-primary text-base" fill />
+            {repoMeta.full_name}
+          </span>
+        )}
+        <button onClick={onNew} className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container-high border border-outline-variant rounded text-on-surface text-xs font-code tracking-wide hover:border-primary transition-colors">
+          <Icon name="add" className="text-base" /> New
+        </button>
+        <button className="text-on-surface-variant hover:text-primary transition-colors p-1.5 rounded hover:bg-surface-container-high">
+          <Icon name="notifications" className="text-xl" />
+        </button>
+        <div className="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center">
+          <Icon name="person" className="text-on-surface-variant text-xl" fill />
+        </div>
+      </div>
+    </header>
+  )
+}
+
+// ─── Landing page ─────────────────────────────────────────────────────────────
+const EXAMPLES = [
+  'https://github.com/facebook/react',
+  'https://github.com/vercel/next.js',
+  'https://github.com/fastapi/fastapi',
+  'https://github.com/microsoft/vscode',
+]
+
+const FEATURES = [
+  ['auto_awesome',  'AI Summary',       'Streaming GPT analysis: purpose, architecture, quality'],
+  ['manage_search', 'Semantic Search',  'Find code locations by natural language intent'],
+  ['chat',          'AI Chat',          'Full conversational Q&A scoped to the repository'],
+  ['schema',        'Architecture',     'Layered system diagram with AI architectural insight'],
+  ['bug_report',    'Bug Detection',    'AI-powered quality, security & maintainability scan'],
+  ['folder_open',   'File Explorer',    'Interactive collapsible repository tree browser'],
+]
+
+function Landing({ onAnalyze, loading, loadStep, error }) {
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [showToken, setShowToken] = useState(false)
+  return (
+    <div className="flex flex-col items-center min-h-screen bg-background relative overflow-hidden">
+      {/* Radial hero glow */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 70% 40% at 50% 30%, rgba(172,199,255,0.07) 0%, transparent 70%)' }} />
+
+      {/* Top nav */}
+      <header className="w-full bg-surface-container border-b border-outline-variant flex items-center justify-between px-6 h-14 sticky top-0 z-50">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-primary-container rounded flex items-center justify-center">
+            <Icon name="insights" className="text-on-primary text-lg" fill />
+          </div>
+          <span className="font-headline font-bold text-on-surface text-base">GitIntel</span>
+        </div>
+        <nav className="hidden md:flex items-center gap-6">
+          {['Dashboard', 'History', 'Docs'].map(l => (
+            <a key={l} href="#" className="text-sm text-on-surface-variant hover:text-primary transition-colors font-body">{l}</a>
+          ))}
+        </nav>
+        <div className="flex items-center gap-2">
+          <button className="text-on-surface-variant hover:text-primary transition-colors"><Icon name="notifications" /></button>
+          <button className="text-on-surface-variant hover:text-primary transition-colors"><Icon name="settings" /></button>
+          <div className="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center">
+            <Icon name="person" className="text-on-surface-variant" fill />
+          </div>
+        </div>
+      </header>
+
+      {/* Hero */}
+      <section className="relative w-full max-w-5xl mx-auto px-6 pt-20 pb-16 text-center fade-up">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 mb-6 bg-[rgba(172,199,255,0.1)] border border-[rgba(172,199,255,0.25)] rounded-full">
+          <Icon name="bolt" className="text-primary text-sm" fill />
+          <span className="text-primary text-xs font-code tracking-widest uppercase">Technical Intelligence v2.0</span>
+        </div>
+
+        <h1 className="font-display text-4xl md:text-5xl font-bold text-on-surface leading-tight mb-4" style={{ letterSpacing: '-0.02em' }}>
+          Instant Repository Insights for<br />
+          <span className="text-primary">High-Velocity</span> Teams
+        </h1>
+        <p className="text-on-surface-variant text-lg max-w-2xl mx-auto mb-10 leading-relaxed">
+          Bridge the gap between granular code analysis and architectural oversight.
+          Paste any GitHub URL to unlock deep intelligence in seconds.
+        </p>
+
+        {/* URL input */}
+        <div className="max-w-2xl mx-auto mb-4">
+          <div className="input-glow flex items-center bg-surface-container-low border border-outline-variant rounded-xl p-2 focus-within:border-primary transition-all duration-300">
+            <Icon name="link" className="text-outline ml-3 flex-shrink-0" />
+            <input
+              className="bg-transparent border-none focus:ring-0 w-full font-code text-sm text-on-surface px-3 placeholder-outline outline-none"
+              placeholder="https://github.com/organization/repository"
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && url.trim() && onAnalyze(url.trim(), token.trim())}
+            />
+            <button
+              onClick={() => url.trim() && onAnalyze(url.trim(), token.trim())}
+              disabled={loading || !url.trim()}
+              className="flex items-center gap-2 bg-[#2F81F7] hover:bg-[#2F81F7]/90 disabled:opacity-40 text-white text-sm font-bold px-5 py-2.5 rounded-lg transition-colors flex-shrink-0"
+            >
+              {loading ? <Spinner size={16} /> : <Icon name="summarize" className="text-base" />}
+              {loading ? 'Analyzing…' : 'Quick Summary'}
+            </button>
+          </div>
+
+          {/* PAT toggle */}
+          <div className="text-left mt-3">
+            <button onClick={() => setShowToken(t => !t)}
+              className="text-xs text-on-surface-variant hover:text-primary transition-colors font-code underline underline-offset-2">
+              {showToken ? '▾ Hide' : '▸ Add'} GitHub token (fixes rate-limit errors)
+            </button>
+            {showToken && (
+              <div className="mt-2">
+                <input
+                  type="password"
+                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                  value={token}
+                  onChange={e => setToken(e.target.value)}
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 font-code text-xs text-on-surface focus:outline-none focus:border-primary transition-colors placeholder-outline"
+                />
+                <p className="text-xs text-outline mt-1.5 leading-relaxed">
+                  GitHub → Settings → Developer settings → PAT → Tokens (classic) → No scopes needed for public repos.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="mt-3 flex items-start gap-2 p-3 bg-[rgba(255,180,171,0.08)] border border-error/30 rounded-lg text-left">
+              <Icon name="warning" className="text-error text-base flex-shrink-0 mt-0.5" />
+              <p className="text-error text-sm leading-relaxed">{error}</p>
+            </div>
+          )}
+
+          {/* Load step */}
+          {loading && loadStep && (
+            <div className="mt-3 flex items-center gap-2 text-on-surface-variant text-sm">
+              <Spinner size={15} /> <span className="font-code text-xs">{loadStep}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Trust badges */}
+        <div className="flex flex-wrap justify-center gap-8 mb-12 opacity-60">
+          {[['verified_user', 'Secure Analysis'], ['cloud_done', 'Real-time Data'], ['code', 'LLM Powered']].map(([ic, label]) => (
+            <span key={label} className="flex items-center gap-1.5 text-on-surface-variant font-code text-xs tracking-widest uppercase">
+              <Icon name={ic} className="text-base" /> {label}
+            </span>
+          ))}
+        </div>
+
+        {/* Example repos */}
+        <div className="flex flex-wrap justify-center gap-2 mb-16">
+          <span className="text-xs text-outline self-center font-code">Try:</span>
+          {EXAMPLES.map(e => (
+            <button key={e} onClick={() => setUrl(e)}
+              className="text-xs px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded-full text-on-surface-variant hover:border-primary hover:text-primary transition-all font-code">
+              {e.replace('https://github.com/', '')}
+            </button>
+          ))}
+        </div>
+
+        {/* Feature bento grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
+          {FEATURES.map(([icon, title, desc]) => (
+            <div key={title} className="bg-surface-container-low border border-outline-variant rounded-xl p-5 card-hover">
+              <div className="w-10 h-10 rounded-lg bg-[rgba(172,199,255,0.1)] flex items-center justify-center mb-3">
+                <Icon name={icon} className="text-primary text-xl" />
+              </div>
+              <h3 className="font-headline font-semibold text-on-surface text-sm mb-1">{title}</h3>
+              <p className="text-on-surface-variant text-xs leading-relaxed">{desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+// ─── Repo stats hero bar ─────────────────────────────────────────────────────
+function RepoHero({ meta, languages, techStack }) {
+  const totalBytes = Object.values(languages).reduce((a, b) => a + b, 0)
+  const langBars = Object.entries(languages)
+    .map(([l, b]) => ({ l, pct: Math.round((b / totalBytes) * 100) }))
+    .sort((a, b) => b.pct - a.pct).slice(0, 7)
+
+  return (
+    <section className="bg-surface-container-low border-b border-outline-variant px-6 py-5">
+      {/* Title row */}
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <img src={meta.owner?.avatar_url} alt="" width={28} height={28} className="rounded-full border border-outline-variant" />
+            <span className="text-on-surface-variant font-body text-sm">{meta.owner?.login} /</span>
+            <h1 className="font-headline font-bold text-on-surface text-xl">{meta.name}</h1>
+            <span className="px-2 py-0.5 bg-tertiary-container text-on-tertiary-container rounded-full font-code text-xs">
+              {meta.private ? 'Private' : 'Public'}
+            </span>
+          </div>
+          {meta.description && (
+            <p className="text-on-surface-variant text-sm max-w-2xl leading-relaxed">{meta.description}</p>
+          )}
+          {/* Topic pills */}
+          {meta.topics?.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {meta.topics.slice(0, 8).map(t => (
+                <span key={t} className="px-2 py-0.5 bg-[rgba(172,199,255,0.1)] text-primary border border-[rgba(172,199,255,0.2)] rounded-full font-code text-xs">{t}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <a href={meta.html_url} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-surface-container-high border border-outline-variant rounded-lg text-on-surface font-code text-xs hover:border-primary transition-colors">
+            <Icon name="open_in_new" className="text-base" /> View on GitHub
+          </a>
+          <button className="flex items-center gap-1.5 px-3 py-2 bg-surface-container-high border border-outline-variant rounded-lg text-on-surface font-code text-xs hover:border-primary transition-colors">
+            <Icon name="star" className="text-base" fill /> {meta.stargazers_count?.toLocaleString()}
+          </button>
+          <button className="flex items-center gap-1.5 px-3 py-2 bg-surface-container-high border border-outline-variant rounded-lg text-on-surface font-code text-xs hover:border-primary transition-colors">
+            <Icon name="fork_right" className="text-base" /> {meta.forks_count?.toLocaleString()}
+          </button>
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <StatCard icon="code" iconColor="text-primary" label="Main Language" value={meta.language} />
+        <StatCard icon="info" iconColor="text-error" label="Open Issues" value={meta.open_issues_count?.toLocaleString()} />
+        <StatCard icon="visibility" iconColor="text-primary" label="Watchers" value={meta.watchers_count?.toLocaleString()} />
+        <StatCard icon="bolt" iconColor="text-tertiary" label="Intel Score" value="—" />
+      </div>
+
+      {/* Language bar */}
+      {langBars.length > 0 && (
+        <div>
+          <div className="flex h-2 rounded-full overflow-hidden mb-2">
+            {langBars.map(({ l, pct }) => (
+              <div key={l} title={`${l} ${pct}%`} style={{ width: `${pct}%`, background: LANG_COLORS[l] || '#8b909f' }} />
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {langBars.map(({ l, pct }) => (
+              <span key={l} className="flex items-center gap-1.5 font-code text-xs text-on-surface-variant">
+                <span className="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ background: LANG_COLORS[l] || '#8b909f' }} />
+                {l} <span className="text-outline">{pct}%</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tech stack */}
+      {techStack.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-3">
+          {techStack.map(t => (
+            <span key={t} className="px-2.5 py-0.5 bg-surface-container-high border border-outline-variant rounded font-code text-xs text-on-surface-variant">{t}</span>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ─── Overview tab ─────────────────────────────────────────────────────────────
+function Overview({ summary, loading }) {
+  return (
+    <div className="fade-up">
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2">
+          <Icon name="auto_awesome" className="text-primary text-xl" />
+          <span className="font-headline font-semibold text-base">AI Intelligence Overview</span>
+          <span className="ml-auto font-code text-xs text-tertiary">GitIntel v2</span>
+        </div>
+        <div className="p-5">
+          {loading && !summary && (
+            <div className="space-y-3">
+              {[80, 60, 90, 50, 70].map((w, i) => (
+                <div key={i} className="skeleton h-4" style={{ width: `${w}%` }} />
+              ))}
+            </div>
+          )}
+          {summary && <MD text={summary} streaming={loading} />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── File explorer tab ────────────────────────────────────────────────────────
+function FileExplorer({ treeObj, totalFiles }) {
+  return (
+    <div className="fade-up">
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2">
+          <Icon name="folder_open" className="text-primary text-xl" />
+          <span className="font-headline font-semibold text-base">Repository Tree</span>
+          <span className="ml-auto font-code text-xs text-on-surface-variant">{totalFiles} files</span>
+        </div>
+        <div className="p-2 max-h-[560px] overflow-y-auto">
+          {treeObj && Object.entries(treeObj)
+            .sort(([, a], [, b]) => (a === null ? 1 : 0) - (b === null ? 1 : 0))
+            .map(([k, v]) => <TreeNode key={k} name={k} node={v} depth={0} />)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Semantic search tab ──────────────────────────────────────────────────────
+const SEARCH_SUGGESTIONS = [
+  'How does authentication work?',
+  'Where are API calls handled?',
+  'Database models & schema',
+  'Error handling patterns',
+  'Main entry point',
+]
+
+function SemanticSearch({ context }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  const search = async (q = query) => {
+    if (!q.trim()) return
+    setLoading(true); setResults([]); setErr('')
+    try {
+      const raw = await completeAI(
+        'You are a semantic code search engine. Return ONLY a valid JSON array, no markdown.',
+        `Repository:\n${context}\n\nQuery: "${q}"\n\nReturn JSON array of 4:\n[{"file":"path/to/file","relevance":"high|medium","explanation":"why relevant","snippet":"short code or comment"}]`
+      )
+      setResults(JSON.parse(raw.replace(/```json|```/g, '').trim()))
+    } catch {
+      setErr('Could not parse results — try rephrasing.')
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div className="fade-up space-y-4">
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2">
+          <Icon name="manage_search" className="text-primary text-xl" />
+          <span className="font-headline font-semibold text-base">Semantic Code Search</span>
+        </div>
+        <div className="p-5">
+          <div className="input-glow flex items-center bg-surface-container-lowest border border-outline-variant rounded-lg p-2 focus-within:border-primary transition-all mb-4">
+            <Icon name="search" className="text-outline ml-2 flex-shrink-0" />
+            <input
+              className="bg-transparent border-none focus:ring-0 w-full font-code text-sm text-on-surface px-3 placeholder-outline outline-none"
+              placeholder="How does authentication work? Where are API calls?"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && search()}
+            />
+            <button onClick={() => search()} disabled={loading}
+              className="flex items-center gap-1.5 bg-[#2F81F7] hover:bg-[#2F81F7]/90 disabled:opacity-40 text-white text-xs font-bold px-4 py-2 rounded-md transition-colors flex-shrink-0">
+              {loading ? <Spinner size={14} /> : <Icon name="search" className="text-base" />}
+              Search
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {SEARCH_SUGGESTIONS.map(s => (
+              <button key={s} onClick={() => { setQuery(s); search(s) }}
+                className="text-xs px-3 py-1.5 bg-surface-container-high border border-outline-variant rounded-full text-on-surface-variant hover:border-primary hover:text-primary transition-all font-code">
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {err && <div className="text-error text-sm font-code p-3 bg-[rgba(255,180,171,0.08)] border border-error/30 rounded-lg">⚠ {err}</div>}
+
+      {results.map((r, i) => (
+        <div key={i} className="bg-surface-container-low border border-outline-variant rounded-xl p-5 card-hover">
+          <div className="flex items-center gap-3 mb-3">
+            <Icon name="description" className="text-primary text-xl flex-shrink-0" />
+            <span className="font-code text-sm text-primary flex-1">{r.file}</span>
+            <span className={`px-2 py-0.5 rounded-full font-code text-xs border ${
+              r.relevance === 'high'
+                ? 'bg-[rgba(103,223,112,0.1)] text-tertiary border-tertiary/30'
+                : 'bg-[rgba(172,199,255,0.1)] text-primary border-primary/30'
+            }`}>{r.relevance}</span>
+          </div>
+          <p className="text-on-surface-variant text-sm leading-relaxed mb-3">{r.explanation}</p>
+          {r.snippet && <pre className="bg-surface-container-lowest border border-outline-variant rounded-lg p-3 font-code text-xs text-tertiary overflow-x-auto whitespace-pre">{r.snippet}</pre>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── AI Chat tab ──────────────────────────────────────────────────────────────
+const CHAT_STARTERS = [
+  'Explain the main architecture',
+  'How do I contribute to this project?',
+  'What are the key dependencies?',
+  'Walk me through the authentication flow',
+]
+
+function AIChat({ context }) {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const bottomRef = useRef(null)
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  const send = async (text = input) => {
+    if (!text.trim() || loading) return
+    setInput('')
+    setMessages(p => [...p, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }])
+    setLoading(true)
+    let ai = ''
+    try {
+      const hist = messages.map(m => `${m.role === 'user' ? 'Human' : 'Assistant'}: ${m.content}`).join('\n')
+      await streamAI(
+        `You are GitIntel's expert code assistant. You have full repo context:\n\n${context}`,
+        `${hist ? hist + '\n' : ''}Human: ${text}`,
+        t => { ai = t; setMessages(p => { const u = [...p]; u[u.length - 1] = { role: 'assistant', content: t, streaming: true }; return u }) }
+      )
+      setMessages(p => { const u = [...p]; u[u.length - 1] = { role: 'assistant', content: ai, streaming: false }; return u })
+    } catch (e) {
+      setMessages(p => { const u = [...p]; u[u.length - 1] = { role: 'assistant', content: `Error: ${e.message}`, streaming: false }; return u })
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div className="fade-up flex flex-col gap-3" style={{ height: 'calc(100vh - 280px)', minHeight: 500 }}>
+      {/* Messages */}
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden flex flex-col flex-1">
+        <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2 flex-shrink-0">
+          <Icon name="chat" className="text-primary text-xl" />
+          <span className="font-headline font-semibold text-base">Repository Chat</span>
+          <span className="ml-auto flex items-center gap-1.5 font-code text-xs text-tertiary">
+            <span className="w-1.5 h-1.5 bg-tertiary rounded-full inline-block" /> Online
+          </span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center py-12">
+              <div className="w-14 h-14 bg-[rgba(172,199,255,0.1)] rounded-full flex items-center justify-center mx-auto mb-4">
+                <Icon name="chat" className="text-primary text-2xl" />
+              </div>
+              <p className="text-on-surface font-headline font-semibold mb-1">Chat with this repo</p>
+              <p className="text-on-surface-variant text-sm mb-6">Ask anything about the codebase, architecture, or how to contribute.</p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {CHAT_STARTERS.map(q => (
+                  <button key={q} onClick={() => send(q)}
+                    className="text-xs px-3 py-2 bg-[rgba(172,199,255,0.1)] border border-[rgba(172,199,255,0.25)] rounded-lg text-primary hover:bg-[rgba(172,199,255,0.18)] transition-colors font-code">
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((m, i) => (
+            <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+              <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
+                m.role === 'user' ? 'bg-[#2F81F7] text-white' : 'bg-surface-container-highest border border-outline-variant'
+              }`}>
+                {m.role === 'user' ? <Icon name="person" className="text-base" fill /> : <Icon name="auto_awesome" className="text-primary text-base" fill />}
+              </div>
+              <div className={`max-w-[82%] px-4 py-3 rounded-xl border ${
+                m.role === 'user'
+                  ? 'bg-[rgba(47,129,247,0.15)] border-[rgba(47,129,247,0.3)] rounded-tr-sm'
+                  : 'bg-surface-container border-outline-variant rounded-tl-sm'
+              }`}>
+                {m.role === 'assistant'
+                  ? <MD text={m.content || '…'} streaming={m.streaming} />
+                  : <p className="text-sm text-on-surface leading-relaxed">{m.content}</p>}
+              </div>
+            </div>
+          ))}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+
+      {/* Input */}
+      <div className="input-glow flex items-center bg-surface-container-low border border-outline-variant rounded-xl p-2 focus-within:border-primary transition-all flex-shrink-0">
+        <input
+          className="bg-transparent border-none focus:ring-0 w-full font-code text-sm text-on-surface px-3 placeholder-outline outline-none"
+          placeholder="Ask about the codebase…"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+          disabled={loading}
+        />
+        <button onClick={() => send()} disabled={loading || !input.trim()}
+          className="flex items-center gap-1.5 bg-[#2F81F7] hover:bg-[#2F81F7]/90 disabled:opacity-40 text-white text-sm font-bold px-4 py-2.5 rounded-lg transition-colors flex-shrink-0">
+          {loading ? <Spinner size={16} /> : <Icon name="send" className="text-base" />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Architecture tab ─────────────────────────────────────────────────────────
+const ARCH_LAYERS = [
+  { label: 'Presentation',   color: '#acc7ff', bg: 'rgba(172,199,255,0.08)', items: ['UI Components', 'State Management', 'Routing', 'API Client'] },
+  { label: 'Application',    color: '#d7b4fe', bg: 'rgba(215,180,254,0.08)', items: ['Business Logic', 'Auth / AuthZ', 'Data Transform', 'Event System'] },
+  { label: 'Infrastructure', color: '#fbbf24', bg: 'rgba(251,191,36,0.08)',  items: ['REST / GraphQL', 'Middleware', 'Rate Limiting', 'Caching'] },
+  { label: 'Persistence',    color: '#67df70', bg: 'rgba(103,223,112,0.08)', items: ['Database', 'File Storage', 'Search Index', 'Message Queue'] },
+]
+
+function Architecture({ insight, loading }) {
+  return (
+    <div className="fade-up">
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2">
+          <Icon name="schema" className="text-primary text-xl" />
+          <span className="font-headline font-semibold text-base">System Architecture</span>
+        </div>
+        <div className="p-5">
+          {loading && !insight && (
+            <div className="space-y-2 mb-6">
+              {[90, 70, 80].map((w, i) => <div key={i} className="skeleton h-4" style={{ width: `${w}%` }} />)}
+            </div>
+          )}
+          {insight && (
+            <p className="text-on-surface-variant text-sm leading-relaxed mb-6 pb-5 border-b border-outline-variant">{insight}</p>
+          )}
+          <div className="space-y-3">
+            {ARCH_LAYERS.map((l, i) => (
+              <div key={l.label}>
+                <div className="border rounded-xl overflow-hidden" style={{ borderColor: l.color + '33' }}>
+                  <div className="px-4 py-2 flex items-center gap-2 border-b" style={{ background: l.bg, borderColor: l.color + '22' }}>
+                    <span className="font-code text-xs font-bold tracking-widest uppercase" style={{ color: l.color }}>{l.label}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 p-4">
+                    {l.items.map(it => (
+                      <span key={it} className="px-3 py-1 rounded-full font-code text-xs border" style={{ background: l.bg, color: l.color, borderColor: l.color + '30' }}>{it}</span>
+                    ))}
+                  </div>
+                </div>
+                {i < ARCH_LAYERS.length - 1 && (
+                  <div className="text-center text-outline text-xs py-1">↕</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Bug analysis tab ─────────────────────────────────────────────────────────
+function BugAnalysis({ report, loading }) {
+  return (
+    <div className="fade-up">
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2">
+          <Icon name="bug_report" className="text-error text-xl" />
+          <span className="font-headline font-semibold text-base">AI Code Analysis</span>
+          <span className="ml-auto px-2 py-0.5 bg-[rgba(255,180,171,0.1)] text-error border border-error/30 rounded-full font-code text-xs">Security Scan</span>
+        </div>
+        <div className="p-5">
+          {loading && !report && (
+            <div className="space-y-2">
+              {[85, 65, 75, 55, 80].map((w, i) => <div key={i} className="skeleton h-4" style={{ width: `${w}%` }} />)}
+            </div>
+          )}
+          {report && <MD text={report} streaming={loading} />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Right sidebar (ToC / meta) ───────────────────────────────────────────────
+function RightPanel({ meta, tab, setTab }) {
+  const sections = NAV_ITEMS.map(n => ({ id: n.id, label: n.label, icon: n.icon }))
+  return (
+    <aside className="hidden xl:flex flex-col w-60 flex-shrink-0 space-y-4">
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden sticky top-20">
+        <div className="px-4 py-3 border-b border-outline-variant">
+          <span className="font-code text-xs text-on-surface-variant uppercase tracking-widest">Dashboard</span>
+        </div>
+        <ul className="p-2 space-y-0.5">
+          {sections.map(s => (
+            <li key={s.id}>
+              <button onClick={() => setTab(s.id)}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-colors font-code text-xs tracking-wide ${
+                  tab === s.id
+                    ? 'bg-[rgba(172,199,255,0.1)] text-primary border-l-2 border-primary'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
+                }`}>
+                <Icon name={s.icon} className="text-base" fill={tab === s.id} />
+                {s.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {meta && (
+          <div className="m-3 p-3 bg-surface-container-high rounded-xl border border-outline-variant">
+            <span className="font-code text-xs text-on-surface-variant uppercase tracking-widest block mb-2">Intelligence Report</span>
+            <p className="text-on-surface-variant text-xs leading-relaxed mb-3">Last deep-scan completed. Data sourced from GitHub API + Claude AI.</p>
+            <button className="w-full py-1.5 px-3 border border-primary text-primary rounded font-code text-xs hover:bg-[rgba(172,199,255,0.1)] transition-colors">
+              Generate PDF
+            </button>
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+export default function App() {
+  const [loading, setLoading] = useState(false)
+  const [loadStep, setLoadStep] = useState('')
+  const [error, setError] = useState('')
+
+  const [repoMeta, setRepoMeta] = useState(null)
+  const [rawTree, setRawTree] = useState([])
+  const [treeObj, setTreeObj] = useState(null)
   const [languages, setLanguages] = useState({})
   const [techStack, setTechStack] = useState([])
-  const [readme,    setReadme]    = useState('')
+  const [readme, setReadme] = useState('')
 
-  // ── Tab ────────────────────────────────────────────────────────────────────
   const [tab, setTab] = useState('overview')
 
-  // ── Feature states ─────────────────────────────────────────────────────────
-  const [summary,     setSummary]     = useState('')
-  const [sumLoading,  setSumLoading]  = useState(false)
-  const [archText,    setArchText]    = useState('')
+  const [summary, setSummary] = useState('')
+  const [sumLoading, setSumLoading] = useState(false)
+  const [archText, setArchText] = useState('')
   const [archLoading, setArchLoading] = useState(false)
-  const [bugText,     setBugText]     = useState('')
-  const [bugLoading,  setBugLoading]  = useState(false)
+  const [bugText, setBugText] = useState('')
+  const [bugLoading, setBugLoading] = useState(false)
 
-  // ── Context string shared with AI tabs ─────────────────────────────────────
-  const ctx = repoMeta
-    ? buildContext(repoMeta, techStack, rawTree, readme)
-    : ''
+  const ctx = repoMeta ? buildContext(repoMeta, techStack, rawTree, readme) : ''
 
-  // ── Main analyze flow ───────────────────────────────────────────────────────
   const handleAnalyze = async (url, token) => {
     const parsed = parseGitHubUrl(url)
-    if (!parsed) {
-      setError('Please paste a valid GitHub URL — e.g. https://github.com/facebook/react')
-      return
-    }
-
+    if (!parsed) { setError('Please paste a valid GitHub URL — e.g. https://github.com/facebook/react'); return }
     setError(''); setLoading(true)
     setRepoMeta(null); setSummary(''); setArchText(''); setBugText('')
 
@@ -74,18 +820,24 @@ export default function App() {
 
       const stack = detectStack(data.languages, data.tree)
       setTechStack(stack)
-      setTreeObj(buildTreeObj(
-        data.tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 150)
-      ))
+      setTreeObj(buildTreeObj(data.tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 150)))
 
-      // Kick off AI summary immediately
       setLoadStep('Generating AI summary…')
       setSumLoading(true)
-      const summaryCtx = buildContext(data.meta, stack, data.tree, data.readme)
+
+      // Build a SHORT context to keep Gemini fast (< 3 seconds)
+      const shortCtx = `Repo: ${data.meta.full_name}
+Description: ${data.meta.description || 'None'}
+Language: ${data.meta.language} | Stars: ${data.meta.stargazers_count} | Forks: ${data.meta.forks_count}
+Stack: ${stack.join(', ')}
+Top files: ${data.tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 40).join(', ')}
+README excerpt: ${data.readme.slice(0, 800)}`
+
       await streamAI(
-        'You are a senior engineer summarizing GitHub repos. Be concise and specific.',
-        `Analyze this repo:\n\n${summaryCtx}\n\nProvide:\n1. **What it does** — one clear paragraph\n2. **Architecture** — how it is structured\n3. **Key features** — bullet list\n4. **Tech choices** — why the stack makes sense\n5. **Code quality** — honest assessment`,
-        t => setSummary(t)
+        'You are a senior engineer. Be concise. Use markdown with **bold** headers.',
+        `Summarize this GitHub repo in 4 short sections:\n\n${shortCtx}\n\n**What it does:** (2 sentences)\n**Architecture:** (2 sentences)\n**Key features:** (3-4 bullets)\n**Code quality:** (1 sentence score)`,
+        t => setSummary(t),
+        600   // limit output tokens for speed
       )
       setSumLoading(false)
       setTab('overview')
@@ -96,81 +848,69 @@ export default function App() {
     }
   }
 
-  // ── Lazy-load Architecture tab ──────────────────────────────────────────────
+  // Build a short context for lazy tabs to keep prompts fast
+  const shortCtx = repoMeta ? `Repo: ${repoMeta.full_name}
+Description: ${repoMeta.description || 'None'}
+Language: ${repoMeta.language} | Stack: ${techStack.join(', ')}
+Top files: ${rawTree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 40).join(', ')}
+README: ${readme.slice(0, 600)}` : ''
+
   useEffect(() => {
     if (tab === 'architecture' && repoMeta && !archText && !archLoading) {
       setArchLoading(true)
       streamAI(
-        'You are a software architect. Give a crisp 3–4 sentence architectural description.',
-        `Describe the architecture of:\n\n${ctx}`,
-        t => setArchText(t)
+        'You are a software architect. Be concise.',
+        `In 3 sentences, describe the architecture of:\n${shortCtx}`,
+        t => setArchText(t),
+        400
       ).finally(() => setArchLoading(false))
     }
-  }, [tab, repoMeta])
-
-  // ── Lazy-load Bug analysis tab ──────────────────────────────────────────────
-  useEffect(() => {
     if (tab === 'bugs' && repoMeta && !bugText && !bugLoading) {
       setBugLoading(true)
       streamAI(
-        'You are a senior code reviewer. Be specific and practical.',
-        `Analyze:\n\n${ctx}\n\n1. **Potential Bugs**\n2. **Security Concerns**\n3. **Code Smells**\n4. **Dependency Risks**\n5. **Maintainability Score** /10 with justification`,
+        'You are a code reviewer. Be specific and brief.',
+        `Analyze this repo:\n${shortCtx}\n\n**Potential Bugs:** (2 bullets)\n**Security Concerns:** (2 bullets)\n**Code Quality:** (1-2 sentences)\n**Maintainability Score:** X/10`,
         t => setBugText(t),
-        1400
+        600
       ).finally(() => setBugLoading(false))
     }
   }, [tab, repoMeta])
 
-  // ── Reset ────────────────────────────────────────────────────────────────────
   const handleReset = () => {
     setRepoMeta(null); setSummary(''); setArchText(''); setBugText('')
     setRawTree([]); setTreeObj(null); setLanguages({}); setTechStack([])
     setReadme(''); setError(''); setTab('overview')
   }
 
+  if (!repoMeta) {
+    return <Landing onAnalyze={handleAnalyze} loading={loading} loadStep={loadStep} error={error} />
+  }
+
   return (
-    <>
-      <Header repoLoaded={!!repoMeta} onReset={handleReset} />
+    <div className="flex flex-col h-screen overflow-hidden bg-background">
+      <TopBar repoMeta={repoMeta} onNew={handleReset} tab={tab} setTab={setTab} />
 
-      <main style={{ maxWidth: 1060, margin: '0 auto', padding: '0 24px 80px' }}>
-        {/* Landing page */}
-        {!repoMeta && (
-          <Landing
-            onAnalyze={handleAnalyze}
-            loading={loading}
-            loadStep={loadStep}
-            error={error}
-          />
-        )}
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar tab={tab} setTab={setTab} onNew={handleReset} />
 
-        {/* Repo dashboard */}
-        {repoMeta && (
-          <div style={{ paddingTop: 26, animation: 'up .3s ease' }}>
-            <RepoHeader meta={repoMeta} languages={languages} techStack={techStack} />
+        <main className="flex-1 overflow-y-auto">
+          <RepoHero meta={repoMeta} languages={languages} techStack={techStack} />
 
-            {/* Tab bar */}
-            <div style={{ display: 'flex', gap: 4, overflowX: 'auto', marginBottom: 22, paddingBottom: 2 }}>
-              {TABS.map(t => (
-                <button
-                  key={t.id}
-                  className={`tab ${tab === t.id ? 'active' : 'inactive'}`}
-                  onClick={() => setTab(t.id)}
-                >
-                  <span>{t.ic}</span> {t.label}
-                </button>
-              ))}
+          <div className="flex gap-6 p-6">
+            {/* Main content */}
+            <div className="flex-1 min-w-0">
+              {tab === 'overview'     && <Overview    summary={summary}   loading={sumLoading} />}
+              {tab === 'files'        && <FileExplorer treeObj={treeObj}   totalFiles={rawTree.filter(n => n.type === 'blob').length} />}
+              {tab === 'search'       && <SemanticSearch context={ctx} />}
+              {tab === 'chat'         && <AIChat        context={ctx} />}
+              {tab === 'architecture' && <Architecture  insight={archText} loading={archLoading} />}
+              {tab === 'bugs'         && <BugAnalysis   report={bugText}   loading={bugLoading} />}
             </div>
 
-            {/* Tab panels */}
-            {tab === 'overview'     && <Overview     summary={summary}   loading={sumLoading} />}
-            {tab === 'files'        && <FileTree      treeObj={treeObj}   totalFiles={rawTree.filter(n => n.type === 'blob').length} />}
-            {tab === 'search'       && <SemanticSearch context={ctx} />}
-            {tab === 'chat'         && <AIChat         context={ctx} />}
-            {tab === 'architecture' && <Architecture  insight={archText}  loading={archLoading} />}
-            {tab === 'bugs'         && <BugAnalysis   report={bugText}    loading={bugLoading} />}
+            <RightPanel meta={repoMeta} tab={tab} setTab={setTab} />
           </div>
-        )}
-      </main>
-    </>
+        </main>
+      </div>
+    </div>
   )
 }

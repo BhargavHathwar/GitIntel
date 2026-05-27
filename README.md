@@ -1,64 +1,72 @@
 # GitIntel — AI-Powered Repository Intelligence
 
-A full-stack AI app that lets you paste any GitHub URL and instantly understand
-the codebase through AI summaries, semantic search, architecture diagrams, and
-conversational AI chat.
+A full-stack AI developer tool: paste any public GitHub URL and instantly
+understand the codebase through AI summaries, semantic search, architecture
+diagrams, and conversational chat.
+
+**AI provider:** Google Gemini (`gemini-2.0-flash`)  
+**Stack:** FastAPI (Python) backend · React + Vite frontend  
+**Design:** GitHub-modern dark · Hanken Grotesk · JetBrains Mono · Material Symbols
+
+---
+
+## Project Structure
 
 ```
 gitintel/
-├── backend/          ← FastAPI (Python)
-│   ├── main.py
+├── .gitignore
+├── README.md
+├── backend/
+│   ├── main.py              ← FastAPI: GitHub fetch, Gemini stream/complete, CORS
 │   ├── requirements.txt
-│   └── .env.example
-└── frontend/         ← React + Vite (JavaScript)
-    ├── src/
-    │   ├── App.jsx
-    │   ├── main.jsx
-    │   ├── index.css
-    │   ├── api/
-    │   │   └── backend.js        ← all API calls
-    │   ├── utils/
-    │   │   └── helpers.js        ← URL parser, stack detector, tree builder
-    │   └── components/
-    │       ├── UI.jsx            ← shared: Spinner, MD, Card, ErrorBanner
-    │       ├── Header.jsx
-    │       ├── Landing.jsx
-    │       ├── RepoHeader.jsx
-    │       ├── Overview.jsx
-    │       ├── FileTree.jsx
-    │       ├── SemanticSearch.jsx
-    │       ├── AIChat.jsx
-    │       ├── Architecture.jsx
-    │       └── BugAnalysis.jsx
-    ├── index.html
-    ├── vite.config.js
-    └── package.json
+│   └── .env.example         ← copy → .env, add your GEMINI_API_KEY
+└── frontend/
+    ├── index.html           ← Tailwind CDN, Google Fonts, Material Symbols
+    ├── vite.config.js       ← Dev proxy: /api/* → localhost:8000
+    ├── package.json
+    └── src/
+        ├── main.jsx
+        ├── App.jsx          ← Full UI: Landing, Dashboard, Sidebar, all tabs
+        ├── api/
+        │   └── backend.js   ← fetchRepo / streamAI / completeAI
+        └── utils/
+            └── helpers.js   ← URL parser, stack detector, tree builder
 ```
 
 ---
 
-## Prerequisites
+## Quick Start
 
-| Tool    | Version  | Install |
-|---------|----------|---------|
-| Python  | 3.10+    | https://python.org |
-| Node.js | 18+      | https://nodejs.org |
-| pip     | latest   | comes with Python |
+### Prerequisites
+
+| Tool    | Version | Install              |
+|---------|---------|----------------------|
+| Python  | 3.10+   | https://python.org   |
+| Node.js | 18+     | https://nodejs.org   |
 
 ---
 
-## 1 — Backend Setup
+### Step 1 — Get your Gemini API key (free)
+
+1. Go to **https://aistudio.google.com/apikey**
+2. Sign in with your Google account
+3. Click **"Create API Key"**
+4. Copy the key — it looks like `AIzaSy_xxxxxxxxxxxxxxxxxxxxxxx`
+
+---
+
+### Step 2 — Backend
 
 ```bash
 cd gitintel/backend
 
-# Create and activate a virtual environment
+# Create and activate virtual environment
 python -m venv venv
 
-# macOS / Linux
+# macOS / Linux:
 source venv/bin/activate
 
-# Windows
+# Windows:
 venv\Scripts\activate
 
 # Install dependencies
@@ -68,13 +76,11 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open `.env` and paste your Anthropic API key:
+Open `.env` and paste your key:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GEMINI_API_KEY=AIzaSy_xxxxxxxxxxxxxxxxxxxxxxx
 ```
-
-Get your key at: https://console.anthropic.com → API Keys
 
 Start the backend:
 
@@ -82,79 +88,78 @@ Start the backend:
 uvicorn main:app --reload --port 8000
 ```
 
-You should see:
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000
-```
-
-Test it: open http://localhost:8000/health — should return `{"status":"ok"}`.
+Confirm: http://localhost:8000/health → `{"status":"ok","model":"gemini-2.0-flash"}`
 
 ---
 
-## 2 — Frontend Setup
+### Step 3 — Frontend
 
 Open a **second terminal**:
 
 ```bash
 cd gitintel/frontend
 
-# Install dependencies
 npm install
-
-# Start the dev server
 npm run dev
 ```
 
-You should see:
-```
-VITE v5.x  ready in Xms
-➜  Local:   http://localhost:5173/
-```
-
-Open http://localhost:5173 in your browser. Done!
+Open **http://localhost:5173**
 
 ---
 
-## How the proxy works
-
-Vite is configured to forward all `/api/*` requests to the backend:
+## How it works
 
 ```
-Browser → http://localhost:5173/api/repo
-         ↓ (Vite proxy)
-Backend → http://localhost:8000/api/repo
+Browser (localhost:5173)
+  └─ /api/*  ──→  Vite proxy  ──→  FastAPI (localhost:8000)
+                                        ├─ GitHub API     (repo metadata, tree, readme)
+                                        └─ Gemini API     (AI summaries, chat, search)
 ```
 
-This means **no CORS issues** and **your API key stays on the backend** — it
-never touches the browser.
+- Your **Gemini API key stays in the backend `.env`** — never exposed to the browser
+- GitHub data is fetched server-side, avoiding CORS issues
+- Streaming responses use Gemini's `streamGenerateContent` SSE endpoint,
+  normalised to a simple `{delta:{text}}` format for the frontend
 
 ---
 
 ## GitHub Rate Limits
 
-Unauthenticated GitHub API calls are limited to **60 requests/hour per IP**.
-To increase this, generate a free Personal Access Token:
+Unauthenticated: **60 req/hr**. To increase to 5 000/hr:
 
 1. GitHub → Settings → Developer settings
 2. Personal access tokens → Tokens (classic)
-3. Generate new token (classic)
-4. **Select no scopes** (public repos don't need any)
-5. Copy and paste it into the token field in the app
+3. Generate new token — **select no scopes** (public repos need none)
+4. Paste into the token field in the app UI
 
 ---
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| AI Summary | Streaming GPT-powered repo analysis |
-| File Tree | Interactive collapsible directory browser |
-| Semantic Search | Natural-language code location search |
-| AI Chat | Full conversation with repo context |
-| Architecture | Layered system diagram + AI insight |
-| Bug Analysis | AI-powered quality & security scan |
-| Language Bar | Visual breakdown like GitHub |
-| Tech Stack | Auto-detects frameworks & tools |
+| Tab | Feature |
+|-----|---------|
+| AI Overview | Streaming Gemini analysis: purpose, architecture, tech choices, quality |
+| File Explorer | Collapsible tree browser with language-colour dots |
+| Semantic Search | Natural-language code-location search via Gemini |
+| AI Chat | Full multi-turn conversation scoped to repo context |
+| Architecture | Layered system diagram + AI architectural description |
+| Code Analysis | Bug detection, security scan, maintainability score |
+
+---
+
+## Gemini Model
+
+The backend uses **`gemini-2.0-flash`** by default — it's fast, has a large
+context window (great for code), and is free under the generous Google AI
+Studio quota.
+
+To switch models, edit `GEMINI_MODEL` in `backend/main.py`:
+
+```python
+GEMINI_MODEL = "gemini-2.0-flash"        # default — fast, free tier
+GEMINI_MODEL = "gemini-2.5-flash"        # smarter, still fast
+GEMINI_MODEL = "gemini-2.5-pro"          # most capable
+```
 
 ---
 
@@ -162,14 +167,13 @@ To increase this, generate a free Personal Access Token:
 
 ```bash
 # Build frontend static files
-cd frontend
-npm run build        # outputs to frontend/dist/
+cd frontend && npm run build   # → frontend/dist/
 
-# Serve backend with gunicorn
+# Run backend with gunicorn
 cd backend
 pip install gunicorn
 gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
-Then point your web server (Nginx, Caddy, etc.) to serve `frontend/dist/`
-as static files and proxy `/api/` to port 8000.
+Serve `frontend/dist/` as static files and proxy `/api/` to port 8000
+via Nginx or Caddy.
