@@ -1,4 +1,4 @@
-const BASE = '/api'
+const BASE = import.meta.env.VITE_API_URL || '/api'
 
 // ── Phase 1: fast skeleton (meta + languages only, ~300-600ms) ──────────────
 export async function fetchRepoMeta(owner, repo, token = '') {
