@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { fetchRepo, streamAI, completeAI } from './api/backend.js'
+import { fetchRepoMeta, fetchRepoDetails, streamAI, completeAI } from './api/backend.js'
 import { parseGitHubUrl, detectStack, buildTreeObj, buildContext, LANG_COLORS } from './utils/helpers.js'
 
 // ─── Tiny shared primitives ─────────────────────────────────────────────────
@@ -69,6 +69,44 @@ function TreeNode({ name, node, depth }) {
       {isDir && open && Object.entries(node)
         .sort(([, a], [, b]) => (a === null ? 1 : 0) - (b === null ? 1 : 0))
         .map(([k, v]) => <TreeNode key={k} name={k} node={v} depth={depth + 1} />)}
+    </div>
+  )
+}
+
+// ─── Tree skeleton (shown while tree loads) ──────────────────────────────────
+function TreeSkeleton() {
+  // Mimic a realistic folder structure with varying widths
+  const rows = [
+    { depth: 0, w: 120, isDir: true },
+    { depth: 1, w: 90,  isDir: false },
+    { depth: 1, w: 105, isDir: false },
+    { depth: 1, w: 80,  isDir: false },
+    { depth: 0, w: 100, isDir: true },
+    { depth: 1, w: 130, isDir: false },
+    { depth: 1, w: 85,  isDir: false },
+    { depth: 0, w: 95,  isDir: true },
+    { depth: 1, w: 110, isDir: false },
+    { depth: 1, w: 70,  isDir: false },
+    { depth: 1, w: 125, isDir: false },
+    { depth: 0, w: 88,  isDir: false },
+    { depth: 0, w: 76,  isDir: false },
+    { depth: 0, w: 92,  isDir: false },
+  ]
+  return (
+    <div className="p-2 space-y-1">
+      {rows.map((r, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-1.5 px-2 py-0.5"
+          style={{ paddingLeft: 8 + r.depth * 16 }}
+        >
+          <div className="skeleton rounded w-3 h-3 flex-shrink-0" style={{ opacity: 0.5 }} />
+          <div
+            className="skeleton rounded h-3"
+            style={{ width: r.w, animationDelay: `${i * 60}ms` }}
+          />
+        </div>
+      ))}
     </div>
   )
 }
@@ -459,19 +497,32 @@ function Overview({ summary, loading }) {
 }
 
 // ─── File explorer tab ────────────────────────────────────────────────────────
-function FileExplorer({ treeObj, totalFiles }) {
+function FileExplorer({ treeObj, totalFiles, treeLoading }) {
   return (
     <div className="fade-up">
       <div className="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden">
         <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2">
           <Icon name="folder_open" className="text-primary text-xl" />
           <span className="font-headline font-semibold text-base">Repository Tree</span>
-          <span className="ml-auto font-code text-xs text-on-surface-variant">{totalFiles} files</span>
+          <span className="ml-auto font-code text-xs text-on-surface-variant">
+            {treeLoading
+              ? <span className="flex items-center gap-1.5"><Spinner size={12} /> Loading tree…</span>
+              : `${totalFiles} files`}
+          </span>
         </div>
         <div className="p-2 max-h-[560px] overflow-y-auto">
-          {treeObj && Object.entries(treeObj)
+          {/* Show skeleton while tree is loading */}
+          {treeLoading && <TreeSkeleton />}
+
+          {/* Show real tree once loaded */}
+          {!treeLoading && treeObj && Object.entries(treeObj)
             .sort(([, a], [, b]) => (a === null ? 1 : 0) - (b === null ? 1 : 0))
             .map(([k, v]) => <TreeNode key={k} name={k} node={v} depth={0} />)}
+
+          {/* Empty state */}
+          {!treeLoading && !treeObj && (
+            <p className="text-on-surface-variant text-xs p-4 font-code">No files found.</p>
+          )}
         </div>
       </div>
     </div>
@@ -791,6 +842,7 @@ export default function App() {
   const [repoMeta, setRepoMeta] = useState(null)
   const [rawTree, setRawTree] = useState([])
   const [treeObj, setTreeObj] = useState(null)
+  const [treeLoading, setTreeLoading] = useState(false)   // ← new: tracks phase-2 tree loading
   const [languages, setLanguages] = useState({})
   const [techStack, setTechStack] = useState([])
   const [readme, setReadme] = useState('')
@@ -811,76 +863,110 @@ export default function App() {
     if (!parsed) { setError('Please paste a valid GitHub URL — e.g. https://github.com/facebook/react'); return }
     setError(''); setLoading(true)
     setRepoMeta(null); setSummary(''); setArchText(''); setBugText('')
+    setRawTree([]); setTreeObj(null); setReadme('')
 
     try {
-      setLoadStep('Fetching repository data…')
-      const data = await fetchRepo(parsed.owner, parsed.repo, token)
+      // ── Phase 1: fetch meta + languages (fast, ~300-600ms) ──────────────
+      setLoadStep('Fetching repository…')
+      const { meta, languages: langs } = await fetchRepoMeta(parsed.owner, parsed.repo, token)
 
-      setRepoMeta(data.meta)
-      setLanguages(data.languages)
-      setReadme(data.readme)
-      setRawTree(data.tree)
+      // Compute tech stack from languages alone (no tree yet — enough for most detections)
+      const partialStack = detectStack(langs, [])
+      setRepoMeta(meta)
+      setLanguages(langs)
+      setTechStack(partialStack)
+      setLoading(false)        // ← landing spinner off; skeleton is now visible
+      setLoadStep('')
 
-      const stack = detectStack(data.languages, data.tree)
-      setTechStack(stack)
-      setTreeObj(buildTreeObj(data.tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 150)))
-
-      setLoadStep('Generating AI summary…')
+      // ── Phase 2: fetch tree + readme in background (slow, ~1-3s) ────────
+      setTreeLoading(true)
       setSumLoading(true)
+      setTab('overview')
 
-      // Build a SHORT context to keep Gemini fast (< 3 seconds)
-      const shortCtx = `Repo: ${data.meta.full_name}
-Description: ${data.meta.description || 'None'}
-Language: ${data.meta.language} | Stars: ${data.meta.stargazers_count} | Forks: ${data.meta.forks_count}
-Stack: ${stack.join(', ')}
-Top files: ${data.tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 40).join(', ')}
-README excerpt: ${data.readme.slice(0, 800)}`
+      // Fire tree+readme fetch and AI summary in parallel
+      const detailsPromise = fetchRepoDetails(parsed.owner, parsed.repo, token)
+        .then(({ readme: rm, tree }) => {
+          const stack = detectStack(langs, tree)
+          setTechStack(stack)
+          setRawTree(tree)
+          setReadme(rm)
+          setTreeObj(buildTreeObj(tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 150)))
+          setTreeLoading(false)
+          return { readme: rm, tree, stack }
+        })
+        .catch(err => {
+          console.warn('Tree/readme fetch failed:', err)
+          setTreeLoading(false)
+          return { readme: '', tree: [], stack: partialStack }
+        })
 
+      // AI summary — use what we have from phase 1, update when details arrive
+      const shortCtx = `Repo: ${meta.full_name}
+Description: ${meta.description || 'None'}
+Language: ${meta.language} | Stars: ${meta.stargazers_count} | Forks: ${meta.forks_count}
+Stack: ${partialStack.join(', ')}`
+
+      // Start streaming with partial context immediately
       try {
+        // Wait briefly for details to enrich context, but cap at 800ms so AI starts fast
+        const raceResult = await Promise.race([
+          detailsPromise,
+          new Promise(res => setTimeout(() => res(null), 800))
+        ])
+
+        const enrichedCtx = raceResult
+          ? `${shortCtx}\nTop files: ${raceResult.tree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 80).join(', ')}\nREADME (full):\n${raceResult.readme.slice(0, 2500)}`
+          : shortCtx
+
         await streamAI(
-          'You are a senior engineer. Be concise. Use markdown with **bold** headers.',
-          `Summarize this GitHub repo in 4 short sections:\n\n${shortCtx}\n\n**What it does:** (2 sentences)\n**Architecture:** (2 sentences)\n**Key features:** (3-4 bullets)\n**Code quality:** (1 sentence score)`,
+          'You are a senior software engineer doing a deep technical review. Write detailed, insightful analysis. Use markdown formatting with **bold** section headers. Be thorough and specific — mention actual file names, patterns, and technologies you see.',
+          `Analyze this GitHub repository in depth and produce a comprehensive intelligence report:\n\n${enrichedCtx}\n\n## 🎯 What It Does\nExplain the purpose, problem it solves, and target users in 3-4 sentences.\n\n## 🏗️ Architecture & Design\nDescribe the overall architecture, design patterns used, how components interact, and folder structure in 4-5 sentences.\n\n## ✨ Key Features\nList 6-8 notable features or capabilities with a brief explanation of each.\n\n## 🛠️ Tech Stack & Dependencies\nBreak down the technologies, frameworks, libraries used and why they matter for this project.\n\n## 📁 Codebase Structure\nWalk through the important files/folders and what role each plays.\n\n## ⚡ Code Quality & Best Practices\nAssess code organization, patterns, test coverage, documentation quality, and any notable strengths or concerns.\n\n## 🚀 Getting Started\nBriefly explain how someone would set up and run this project.\n\n## 💡 Verdict\nOverall assessment: is this production-ready, a learning project, or a prototype? Rate it 1-10 with justification.`,
           t => setSummary(t),
-          600   // limit output tokens for speed
+          2000
         )
       } catch (aiErr) {
         setSummary(`**Overview generation failed**\n\nCould not generate AI summary: ${aiErr.message}\n\nThe repository data was loaded successfully. You can still use File Explorer, Search, and Chat tabs.`)
       } finally {
         setSumLoading(false)
       }
-      setTab('overview')
+
+      // Make sure details are done (they may still be in-flight)
+      await detailsPromise
+
     } catch (e) {
       setError(e.message || 'Something went wrong. Check the URL and try again.')
-    } finally {
-      setLoading(false); setLoadStep('')
+      setLoading(false)
+      setLoadStep('')
+      setTreeLoading(false)
+      setSumLoading(false)
     }
   }
 
-  // Build a short context for lazy tabs to keep prompts fast
+  // Build a short context for lazy tabs
   const shortCtx = repoMeta ? `Repo: ${repoMeta.full_name}
 Description: ${repoMeta.description || 'None'}
 Language: ${repoMeta.language} | Stack: ${techStack.join(', ')}
-Top files: ${rawTree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 40).join(', ')}
-README: ${readme.slice(0, 600)}` : ''
+Top files: ${rawTree.filter(n => n.type === 'blob').map(n => n.path).slice(0, 80).join(', ')}
+README: ${readme.slice(0, 2000)}` : ''
 
   useEffect(() => {
     if (tab === 'architecture' && repoMeta && !archText && !archLoading) {
       setArchLoading(true)
       streamAI(
-        'You are a software architect. Be concise.',
-        `In 3 sentences, describe the architecture of:\n${shortCtx}`,
+        'You are a senior software architect. Write a detailed, insightful architectural analysis.',
+        `Analyze the system architecture of this repository:\n\n${shortCtx}\n\nDescribe: the overall architectural pattern (MVC, microservices, monolith, etc.), how the layers interact, key design decisions, data flow, and any architectural strengths or concerns you notice. Be specific and thorough — 5-7 sentences.`,
         t => setArchText(t),
-        400
+        800
       ).catch(e => setArchText(`Architecture analysis failed: ${e.message}`))
         .finally(() => setArchLoading(false))
     }
     if (tab === 'bugs' && repoMeta && !bugText && !bugLoading) {
       setBugLoading(true)
       streamAI(
-        'You are a code reviewer. Be specific and brief.',
-        `Analyze this repo:\n${shortCtx}\n\n**Potential Bugs:** (2 bullets)\n**Security Concerns:** (2 bullets)\n**Code Quality:** (1-2 sentences)\n**Maintainability Score:** X/10`,
+        'You are an expert code reviewer and security engineer. Be specific, detailed, and actionable.',
+        `Perform a thorough code quality and security analysis of this repository:\n\n${shortCtx}\n\n## 🐛 Potential Bugs\nList 4-5 specific potential bugs or logic issues with file references where possible.\n\n## 🔒 Security Concerns\nList 4-5 security vulnerabilities or risks (injection, auth issues, exposed secrets, etc.).\n\n## 📊 Code Quality Assessment\nAssess: naming conventions, code organization, error handling, DRY principles, and documentation quality in 3-4 sentences.\n\n## 🧪 Testing & Reliability\nComment on test coverage, missing tests, and reliability concerns.\n\n## 🔧 Top Improvements\nList the 5 most impactful improvements the team should prioritize.\n\n## 📈 Maintainability Score: X/10\nJustify the score in 2 sentences.`,
         t => setBugText(t),
-        600
+        1500
       ).catch(e => setBugText(`Code analysis failed: ${e.message}`))
         .finally(() => setBugLoading(false))
     }
@@ -889,7 +975,7 @@ README: ${readme.slice(0, 600)}` : ''
   const handleReset = () => {
     setRepoMeta(null); setSummary(''); setArchText(''); setBugText('')
     setRawTree([]); setTreeObj(null); setLanguages({}); setTechStack([])
-    setReadme(''); setError(''); setTab('overview')
+    setReadme(''); setError(''); setTab('overview'); setTreeLoading(false)
   }
 
   if (!repoMeta) {
@@ -910,7 +996,7 @@ README: ${readme.slice(0, 600)}` : ''
             {/* Main content */}
             <div className="flex-1 min-w-0">
               {tab === 'overview'     && <Overview    summary={summary}   loading={sumLoading} />}
-              {tab === 'files'        && <FileExplorer treeObj={treeObj}   totalFiles={rawTree.filter(n => n.type === 'blob').length} />}
+              {tab === 'files'        && <FileExplorer treeObj={treeObj}   totalFiles={rawTree.filter(n => n.type === 'blob').length} treeLoading={treeLoading} />}
               {tab === 'search'       && <SemanticSearch context={ctx} />}
               {tab === 'chat'         && <AIChat        context={ctx} />}
               {tab === 'architecture' && <Architecture  insight={archText} loading={archLoading} />}

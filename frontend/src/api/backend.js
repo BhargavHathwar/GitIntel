@@ -1,5 +1,34 @@
 const BASE = '/api'
 
+// ── Phase 1: fast skeleton (meta + languages only, ~300-600ms) ──────────────
+export async function fetchRepoMeta(owner, repo, token = '') {
+  const res = await fetch(`${BASE}/repo/meta`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, repo, token }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw Object.assign(new Error(err.detail || 'Failed to fetch repo'), { status: res.status })
+  }
+  return res.json()
+}
+
+// ── Phase 2: tree + readme (runs after skeleton is visible) ─────────────────
+export async function fetchRepoDetails(owner, repo, token = '') {
+  const res = await fetch(`${BASE}/repo/details`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, repo, token }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw Object.assign(new Error(err.detail || 'Failed to fetch repo details'), { status: res.status })
+  }
+  return res.json()
+}
+
+// ── Legacy single-call fetch (kept for fallback) ─────────────────────────────
 export async function fetchRepo(owner, repo, token = '') {
   const res = await fetch(`${BASE}/repo`, {
     method: 'POST',
