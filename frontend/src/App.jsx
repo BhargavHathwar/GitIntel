@@ -180,7 +180,7 @@ function Sidebar({ tab, setTab, onNew }) {
 }
 
 // ─── TopBar ──────────────────────────────────────────────────────────────────
-function TopBar({ repoMeta, onNew, tab, setTab }) {
+function TopBar({ repoMeta, onNew, tab, setTab, theme, toggleTheme }) {
   return (
     <header className="bg-surface-container border-b border-outline-variant flex items-center justify-between px-6 h-14 flex-shrink-0 sticky top-0 z-30">
       {/* Mobile logo */}
@@ -212,6 +212,9 @@ function TopBar({ repoMeta, onNew, tab, setTab }) {
         <button onClick={onNew} className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container-high border border-outline-variant rounded text-on-surface text-xs font-code tracking-wide hover:border-primary transition-colors">
           <Icon name="add" className="text-base" /> New
         </button>
+        <button onClick={toggleTheme} className="text-on-surface-variant hover:text-primary transition-colors p-1.5 rounded hover:bg-surface-container-high" title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+          <Icon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} className="text-xl" />
+        </button>
         <button className="text-on-surface-variant hover:text-primary transition-colors p-1.5 rounded hover:bg-surface-container-high">
           <Icon name="notifications" className="text-xl" />
         </button>
@@ -240,14 +243,14 @@ const FEATURES = [
   ['folder_open',   'File Explorer',    'Interactive collapsible repository tree browser'],
 ]
 
-function Landing({ onAnalyze, loading, loadStep, error }) {
+function Landing({ onAnalyze, loading, loadStep, error, theme, toggleTheme }) {
   const [url, setUrl] = useState('')
   const [token, setToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   return (
     <div className="flex flex-col items-center min-h-screen bg-background relative overflow-hidden">
       {/* Radial hero glow */}
-      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 70% 40% at 50% 30%, rgba(172,199,255,0.07) 0%, transparent 70%)' }} />
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 70% 40% at 50% 30%, var(--primary-glow) 0%, transparent 70%)' }} />
 
       {/* Top nav */}
       <header className="w-full bg-surface-container border-b border-outline-variant flex items-center justify-between px-6 h-14 sticky top-0 z-50">
@@ -263,6 +266,9 @@ function Landing({ onAnalyze, loading, loadStep, error }) {
           ))}
         </nav>
         <div className="flex items-center gap-2">
+          <button onClick={toggleTheme} className="text-on-surface-variant hover:text-primary transition-colors p-1.5 rounded hover:bg-surface-container-high" title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+            <Icon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} className="text-xl" />
+          </button>
           <button className="text-on-surface-variant hover:text-primary transition-colors"><Icon name="notifications" /></button>
           <button className="text-on-surface-variant hover:text-primary transition-colors"><Icon name="settings" /></button>
           <div className="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center">
@@ -273,7 +279,7 @@ function Landing({ onAnalyze, loading, loadStep, error }) {
 
       {/* Hero */}
       <section className="relative w-full max-w-5xl mx-auto px-6 pt-20 pb-16 text-center fade-up">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 mb-6 bg-[rgba(172,199,255,0.1)] border border-[rgba(172,199,255,0.25)] rounded-full">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 mb-6 bg-primary-container-low border border-primary-container-border rounded-full">
           <Icon name="bolt" className="text-primary text-sm" fill />
           <span className="text-primary text-xs font-code tracking-widest uppercase">Technical Intelligence v2.0</span>
         </div>
@@ -332,7 +338,7 @@ function Landing({ onAnalyze, loading, loadStep, error }) {
 
           {/* Error */}
           {error && (
-            <div className="mt-3 flex items-start gap-2 p-3 bg-[rgba(255,180,171,0.08)] border border-error/30 rounded-lg text-left">
+            <div className="mt-3 flex items-start gap-2 p-3 bg-error-container-low border border-error-container-border rounded-lg text-left">
               <Icon name="warning" className="text-error text-base flex-shrink-0 mt-0.5" />
               <p className="text-error text-sm leading-relaxed">{error}</p>
             </div>
@@ -370,7 +376,7 @@ function Landing({ onAnalyze, loading, loadStep, error }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
           {FEATURES.map(([icon, title, desc]) => (
             <div key={title} className="bg-surface-container-low border border-outline-variant rounded-xl p-5 card-hover">
-              <div className="w-10 h-10 rounded-lg bg-[rgba(172,199,255,0.1)] flex items-center justify-center mb-3">
+              <div className="w-10 h-10 rounded-lg bg-primary-container-low flex items-center justify-center mb-3">
                 <Icon name={icon} className="text-primary text-xl" />
               </div>
               <h3 className="font-headline font-semibold text-on-surface text-sm mb-1">{title}</h3>
@@ -410,7 +416,7 @@ function RepoHero({ meta, languages, techStack }) {
           {meta.topics?.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {meta.topics.slice(0, 8).map(t => (
-                <span key={t} className="px-2 py-0.5 bg-[rgba(172,199,255,0.1)] text-primary border border-[rgba(172,199,255,0.2)] rounded-full font-code text-xs">{t}</span>
+                <span key={t} className="px-2 py-0.5 bg-primary-container-low text-primary border border-primary-container-border rounded-full font-code text-xs">{t}</span>
               ))}
             </div>
           )}
@@ -593,7 +599,7 @@ function SemanticSearch({ context }) {
         </div>
       </div>
 
-      {err && <div className="text-error text-sm font-code p-3 bg-[rgba(255,180,171,0.08)] border border-error/30 rounded-lg">⚠ {err}</div>}
+      {err && <div className="text-error text-sm font-code p-3 bg-error-container-low border border-error-container-border rounded-lg">⚠ {err}</div>}
 
       {results.map((r, i) => (
         <div key={i} className="bg-surface-container-low border border-outline-variant rounded-xl p-5 card-hover">
@@ -602,8 +608,8 @@ function SemanticSearch({ context }) {
             <span className="font-code text-sm text-primary flex-1">{r.file}</span>
             <span className={`px-2 py-0.5 rounded-full font-code text-xs border ${
               r.relevance === 'high'
-                ? 'bg-[rgba(103,223,112,0.1)] text-tertiary border-tertiary/30'
-                : 'bg-[rgba(172,199,255,0.1)] text-primary border-primary/30'
+                ? 'bg-tertiary-container-low text-tertiary border-tertiary-container-border'
+                : 'bg-primary-container-low text-primary border-primary-container-border'
             }`}>{r.relevance}</span>
           </div>
           <p className="text-on-surface-variant text-sm leading-relaxed mb-3">{r.explanation}</p>
@@ -665,7 +671,7 @@ function AIChat({ context }) {
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {messages.length === 0 && (
             <div className="text-center py-12">
-              <div className="w-14 h-14 bg-[rgba(172,199,255,0.1)] rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-14 h-14 bg-primary-container-low rounded-full flex items-center justify-center mx-auto mb-4">
                 <Icon name="chat" className="text-primary text-2xl" />
               </div>
               <p className="text-on-surface font-headline font-semibold mb-1">Chat with this repo</p>
@@ -673,7 +679,7 @@ function AIChat({ context }) {
               <div className="flex flex-wrap gap-2 justify-center">
                 {CHAT_STARTERS.map(q => (
                   <button key={q} onClick={() => send(q)}
-                    className="text-xs px-3 py-2 bg-[rgba(172,199,255,0.1)] border border-[rgba(172,199,255,0.25)] rounded-lg text-primary hover:bg-[rgba(172,199,255,0.18)] transition-colors font-code">
+                    className="text-xs px-3 py-2 bg-primary-container-low border border-primary-container-border rounded-lg text-primary hover:bg-primary-container-low/85 transition-colors font-code">
                     {q}
                   </button>
                 ))}
@@ -690,7 +696,7 @@ function AIChat({ context }) {
               </div>
               <div className={`max-w-[82%] px-4 py-3 rounded-xl border ${
                 m.role === 'user'
-                  ? 'bg-[rgba(47,129,247,0.15)] border-[rgba(47,129,247,0.3)] rounded-tr-sm'
+                  ? 'bg-chat-user-bg border-chat-user-border rounded-tr-sm'
                   : 'bg-surface-container border-outline-variant rounded-tl-sm'
               }`}>
                 {m.role === 'assistant'
@@ -724,10 +730,10 @@ function AIChat({ context }) {
 
 // ─── Architecture tab ─────────────────────────────────────────────────────────
 const ARCH_LAYERS = [
-  { label: 'Presentation',   color: '#acc7ff', bg: 'rgba(172,199,255,0.08)', items: ['UI Components', 'State Management', 'Routing', 'API Client'] },
-  { label: 'Application',    color: '#d7b4fe', bg: 'rgba(215,180,254,0.08)', items: ['Business Logic', 'Auth / AuthZ', 'Data Transform', 'Event System'] },
-  { label: 'Infrastructure', color: '#fbbf24', bg: 'rgba(251,191,36,0.08)',  items: ['REST / GraphQL', 'Middleware', 'Rate Limiting', 'Caching'] },
-  { label: 'Persistence',    color: '#67df70', bg: 'rgba(103,223,112,0.08)', items: ['Database', 'File Storage', 'Search Index', 'Message Queue'] },
+  { label: 'Presentation',   color: 'var(--presentation-color)', bg: 'var(--presentation-bg)', border: 'var(--presentation-border)', items: ['UI Components', 'State Management', 'Routing', 'API Client'] },
+  { label: 'Application',    color: 'var(--application-color)', bg: 'var(--application-bg)', border: 'var(--application-border)', items: ['Business Logic', 'Auth / AuthZ', 'Data Transform', 'Event System'] },
+  { label: 'Infrastructure', color: 'var(--infrastructure-color)', bg: 'var(--infrastructure-bg)', border: 'var(--infrastructure-border)', items: ['REST / GraphQL', 'Middleware', 'Rate Limiting', 'Caching'] },
+  { label: 'Persistence',    color: 'var(--persistence-color)', bg: 'var(--persistence-bg)', border: 'var(--persistence-border)', items: ['Database', 'File Storage', 'Search Index', 'Message Queue'] },
 ]
 
 function Architecture({ insight, loading }) {
@@ -750,13 +756,13 @@ function Architecture({ insight, loading }) {
           <div className="space-y-3">
             {ARCH_LAYERS.map((l, i) => (
               <div key={l.label}>
-                <div className="border rounded-xl overflow-hidden" style={{ borderColor: l.color + '33' }}>
-                  <div className="px-4 py-2 flex items-center gap-2 border-b" style={{ background: l.bg, borderColor: l.color + '22' }}>
+                <div className="border rounded-xl overflow-hidden" style={{ borderColor: l.border }}>
+                  <div className="px-4 py-2 flex items-center gap-2 border-b" style={{ background: l.bg, borderColor: l.border }}>
                     <span className="font-code text-xs font-bold tracking-widest uppercase" style={{ color: l.color }}>{l.label}</span>
                   </div>
                   <div className="flex flex-wrap gap-2 p-4">
                     {l.items.map(it => (
-                      <span key={it} className="px-3 py-1 rounded-full font-code text-xs border" style={{ background: l.bg, color: l.color, borderColor: l.color + '30' }}>{it}</span>
+                      <span key={it} className="px-3 py-1 rounded-full font-code text-xs border" style={{ background: l.bg, color: l.color, borderColor: l.border }}>{it}</span>
                     ))}
                   </div>
                 </div>
@@ -780,7 +786,7 @@ function BugAnalysis({ report, loading }) {
         <div className="px-5 py-3 bg-surface-container border-b border-outline-variant flex items-center gap-2">
           <Icon name="bug_report" className="text-error text-xl" />
           <span className="font-headline font-semibold text-base">AI Code Analysis</span>
-          <span className="ml-auto px-2 py-0.5 bg-[rgba(255,180,171,0.1)] text-error border border-error/30 rounded-full font-code text-xs">Security Scan</span>
+          <span className="ml-auto px-2 py-0.5 bg-error-container-low text-error border border-error-container-border rounded-full font-code text-xs">Security Scan</span>
         </div>
         <div className="p-5">
           {loading && !report && (
@@ -810,7 +816,7 @@ function RightPanel({ meta, tab, setTab }) {
               <button onClick={() => setTab(s.id)}
                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-colors font-code text-xs tracking-wide ${
                   tab === s.id
-                    ? 'bg-[rgba(172,199,255,0.1)] text-primary border-l-2 border-primary'
+                    ? 'bg-primary-container-low text-primary border-l-2 border-primary'
                     : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
                 }`}>
                 <Icon name={s.icon} className="text-base" fill={tab === s.id} />
@@ -823,7 +829,7 @@ function RightPanel({ meta, tab, setTab }) {
           <div className="m-3 p-3 bg-surface-container-high rounded-xl border border-outline-variant">
             <span className="font-code text-xs text-on-surface-variant uppercase tracking-widest block mb-2">Intelligence Report</span>
             <p className="text-on-surface-variant text-xs leading-relaxed mb-3">Last deep-scan completed. Data sourced from GitHub API + Claude AI.</p>
-            <button className="w-full py-1.5 px-3 border border-primary text-primary rounded font-code text-xs hover:bg-[rgba(172,199,255,0.1)] transition-colors">
+            <button className="w-full py-1.5 px-3 border border-primary text-primary rounded font-code text-xs hover:bg-primary-container-low transition-colors">
               Generate PDF
             </button>
           </div>
@@ -855,6 +861,19 @@ export default function App() {
   const [archLoading, setArchLoading] = useState(false)
   const [bugText, setBugText] = useState('')
   const [bugLoading, setBugLoading] = useState(false)
+
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light')
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    localStorage.setItem('theme', theme)
+  }, [theme])
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
 
   const ctx = repoMeta ? buildContext(repoMeta, techStack, rawTree, readme) : ''
 
@@ -979,12 +998,12 @@ README: ${readme.slice(0, 2000)}` : ''
   }
 
   if (!repoMeta) {
-    return <Landing onAnalyze={handleAnalyze} loading={loading} loadStep={loadStep} error={error} />
+    return <Landing onAnalyze={handleAnalyze} loading={loading} loadStep={loadStep} error={error} theme={theme} toggleTheme={toggleTheme} />
   }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
-      <TopBar repoMeta={repoMeta} onNew={handleReset} tab={tab} setTab={setTab} />
+      <TopBar repoMeta={repoMeta} onNew={handleReset} tab={tab} setTab={setTab} theme={theme} toggleTheme={toggleTheme} />
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar tab={tab} setTab={setTab} onNew={handleReset} />
