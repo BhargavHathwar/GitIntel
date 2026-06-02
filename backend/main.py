@@ -17,7 +17,12 @@ app = FastAPI(title="GitIntel API", version="2.4.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://git-intel-phi.vercel.app",
+        "https://git-intel-git-main-bhargavhathwars-projects.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
