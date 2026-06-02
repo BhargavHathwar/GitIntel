@@ -35,6 +35,12 @@ function MD({ text, streaming }) {
   )
 }
 
+const GitHubLogo = ({ className = 'w-6 h-6' }) => (
+  <svg viewBox="0 0 16 16" className={className} fill="currentColor" aria-hidden="true">
+    <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.35 3.12.88.01.64.01 1.24.01 1.38 0 .21-.15.46-.55.38A8.013 8.013 0 0 1 0 8c0-4.42 3.58-8 8-8z" />
+  </svg>
+)
+
 // ─── Stat card ──────────────────────────────────────────────────────────────
 function StatCard({ icon, iconColor, label, value }) {
   return (
@@ -126,11 +132,11 @@ function Sidebar({ tab, setTab, onNew }) {
     <aside className="hidden lg:flex flex-col h-full w-64 bg-surface-container-low border-r border-outline-variant flex-shrink-0">
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 py-4 border-b border-outline-variant">
-        <div className="w-9 h-9 bg-primary-container rounded-lg flex items-center justify-center flex-shrink-0">
-          <Icon name="insights" className="text-on-primary text-xl" fill />
+        <div className="w-8 h-8 bg-surface-container-highest border border-outline-variant rounded-md flex items-center justify-center flex-shrink-0 text-on-surface">
+          <GitHubLogo className="w-5 h-5" />
         </div>
         <div>
-          <div className="font-headline font-bold text-primary text-base leading-tight">GitIntel</div>
+          <div className="font-headline font-bold text-on-surface text-base leading-tight">GitIntel</div>
           <div className="font-code text-[10px] text-on-surface-variant uppercase tracking-widest">Repo Intelligence</div>
         </div>
       </div>
@@ -139,7 +145,7 @@ function Sidebar({ tab, setTab, onNew }) {
       <div className="px-3 py-3">
         <button
           onClick={onNew}
-          className="w-full py-2 px-4 bg-tertiary text-on-tertiary-container rounded-lg font-bold text-xs tracking-wide flex items-center justify-center gap-2 hover:brightness-110 transition-all"
+          className="w-full py-2 px-4 bg-tertiary text-white rounded-lg font-bold text-xs tracking-wide flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-sm border border-outline-variant/30"
         >
           <Icon name="add" className="text-base" /> Analyze New Repo
         </button>
@@ -168,12 +174,10 @@ function Sidebar({ tab, setTab, onNew }) {
 
       {/* Bottom links */}
       <div className="px-2 py-3 border-t border-outline-variant space-y-0.5">
-        {[['description', 'Documentation'], ['help', 'Support']].map(([icon, label]) => (
-          <button key={label} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors text-xs font-code tracking-wide">
-            <Icon name={icon} className="text-xl" />
-            {label}
-          </button>
-        ))}
+        <a href="mailto:support@gitintel.dev" className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors text-xs font-code tracking-wide">
+          <Icon name="help" className="text-xl" />
+          Support
+        </a>
       </div>
     </aside>
   )
@@ -182,11 +186,11 @@ function Sidebar({ tab, setTab, onNew }) {
 // ─── TopBar ──────────────────────────────────────────────────────────────────
 function TopBar({ repoMeta, onNew, tab, setTab, theme, toggleTheme }) {
   return (
-    <header className="bg-surface-container border-b border-outline-variant flex items-center justify-between px-6 h-14 flex-shrink-0 sticky top-0 z-30">
+    <header className="bg-[#24292f] border-b border-[#30363d] flex items-center justify-between px-6 h-14 flex-shrink-0 sticky top-0 z-30 text-white">
       {/* Mobile logo */}
-      <div className="flex items-center gap-3 lg:hidden">
-        <Icon name="insights" className="text-primary text-2xl" fill />
-        <span className="font-headline font-bold text-primary text-base">GitIntel</span>
+      <div className="flex items-center gap-3 lg:hidden text-white">
+        <GitHubLogo className="w-6 h-6 text-white" />
+        <span className="font-headline font-bold text-base">GitIntel</span>
       </div>
 
       {/* Mobile tab selector */}
@@ -194,7 +198,7 @@ function TopBar({ repoMeta, onNew, tab, setTab, theme, toggleTheme }) {
         <div className="flex gap-1">
           {NAV_ITEMS.map(item => (
             <button key={item.id} onClick={() => setTab(item.id)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded text-xs font-code tracking-wide transition-colors ${tab === item.id ? 'bg-secondary-container text-on-secondary-container' : 'text-on-surface-variant hover:text-on-surface'}`}>
+              className={`flex-shrink-0 px-3 py-1.5 rounded text-xs font-code tracking-wide transition-colors ${tab === item.id ? 'bg-[#30363d] text-white' : 'text-[#8b949e] hover:text-white'}`}>
               {item.label}
             </button>
           ))}
@@ -204,22 +208,20 @@ function TopBar({ repoMeta, onNew, tab, setTab, theme, toggleTheme }) {
       {/* Right side */}
       <div className="flex items-center gap-2 ml-4">
         {repoMeta && (
-          <span className="hidden md:flex items-center gap-1.5 font-code text-xs text-on-surface-variant">
-            <Icon name="folder" className="text-primary text-base" fill />
-            {repoMeta.full_name}
+          <span className="hidden md:flex items-center gap-1.5 font-code text-xs text-[#8b949e]">
+            <GitHubLogo className="w-4 h-4 text-[#8b949e]" />
+            <span className="text-white font-semibold">{repoMeta.full_name}</span>
           </span>
         )}
-        <button onClick={onNew} className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container-high border border-outline-variant rounded text-on-surface text-xs font-code tracking-wide hover:border-primary transition-colors">
+        <div className="h-4 w-[1px] bg-[#30363d] hidden md:block mx-2" />
+        <button onClick={onNew} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] border border-[#30363d] rounded text-white text-xs font-code tracking-wide hover:border-[#8b949e] transition-colors shadow-sm">
           <Icon name="add" className="text-base" /> New
         </button>
-        <button onClick={toggleTheme} className="text-on-surface-variant hover:text-primary transition-colors p-1.5 rounded hover:bg-surface-container-high" title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+        <button onClick={toggleTheme} className="text-[#8b949e] hover:text-white transition-colors p-1.5 rounded hover:bg-[#30363d]" title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
           <Icon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} className="text-xl" />
         </button>
-        <button className="text-on-surface-variant hover:text-primary transition-colors p-1.5 rounded hover:bg-surface-container-high">
-          <Icon name="notifications" className="text-xl" />
-        </button>
-        <div className="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center">
-          <Icon name="person" className="text-on-surface-variant text-xl" fill />
+        <div className="w-8 h-8 rounded-full bg-[#21262d] border border-[#30363d] flex items-center justify-center">
+          <Icon name="person" className="text-[#8b949e] text-xl" fill />
         </div>
       </div>
     </header>
@@ -253,26 +255,23 @@ function Landing({ onAnalyze, loading, loadStep, error, theme, toggleTheme }) {
       <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 70% 40% at 50% 30%, var(--primary-glow) 0%, transparent 70%)' }} />
 
       {/* Top nav */}
-      <header className="w-full bg-surface-container border-b border-outline-variant flex items-center justify-between px-6 h-14 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-primary-container rounded flex items-center justify-center">
-            <Icon name="insights" className="text-on-primary text-lg" fill />
-          </div>
-          <span className="font-headline font-bold text-on-surface text-base">GitIntel</span>
+      <header className="w-full bg-[#24292f] border-b border-[#30363d] flex items-center justify-between px-6 h-14 sticky top-0 z-50 text-white">
+        <div className="flex items-center gap-3 text-white">
+          <GitHubLogo className="w-6 h-6 text-white" />
+          <span className="font-headline font-bold text-base">GitIntel</span>
         </div>
         <nav className="hidden md:flex items-center gap-6">
           {['Dashboard', 'History', 'Docs'].map(l => (
-            <a key={l} href="#" className="text-sm text-on-surface-variant hover:text-primary transition-colors font-body">{l}</a>
+            <a key={l} href="#" className="text-sm text-[#8b949e] hover:text-white transition-colors font-body">{l}</a>
           ))}
         </nav>
         <div className="flex items-center gap-2">
-          <button onClick={toggleTheme} className="text-on-surface-variant hover:text-primary transition-colors p-1.5 rounded hover:bg-surface-container-high" title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+          <button onClick={toggleTheme} className="text-[#8b949e] hover:text-white transition-colors p-1.5 rounded hover:bg-[#30363d]" title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
             <Icon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} className="text-xl" />
           </button>
-          <button className="text-on-surface-variant hover:text-primary transition-colors"><Icon name="notifications" /></button>
-          <button className="text-on-surface-variant hover:text-primary transition-colors"><Icon name="settings" /></button>
-          <div className="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center">
-            <Icon name="person" className="text-on-surface-variant" fill />
+          <button className="text-[#8b949e] hover:text-white transition-colors"><Icon name="settings" /></button>
+          <div className="w-8 h-8 rounded-full bg-[#21262d] border border-[#30363d] flex items-center justify-center">
+            <Icon name="person" className="text-[#8b949e]" fill />
           </div>
         </div>
       </header>
@@ -307,34 +306,13 @@ function Landing({ onAnalyze, loading, loadStep, error, theme, toggleTheme }) {
             <button
               onClick={() => url.trim() && onAnalyze(url.trim(), token.trim())}
               disabled={loading || !url.trim()}
-              className="flex items-center gap-2 bg-[#2F81F7] hover:bg-[#2F81F7]/90 disabled:opacity-40 text-white text-sm font-bold px-5 py-2.5 rounded-lg transition-colors flex-shrink-0"
+              className="flex items-center gap-2 bg-primary text-on-primary hover:brightness-95 disabled:opacity-40 text-sm font-bold px-5 py-2.5 rounded-lg transition-all flex-shrink-0 shadow-sm"
             >
               {loading ? <Spinner size={16} /> : <Icon name="summarize" className="text-base" />}
               {loading ? 'Analyzing…' : 'Quick Summary'}
             </button>
           </div>
 
-          {/* PAT toggle */}
-          <div className="text-left mt-3">
-            <button onClick={() => setShowToken(t => !t)}
-              className="text-xs text-on-surface-variant hover:text-primary transition-colors font-code underline underline-offset-2">
-              {showToken ? '▾ Hide' : '▸ Add'} GitHub token (fixes rate-limit errors)
-            </button>
-            {showToken && (
-              <div className="mt-2">
-                <input
-                  type="password"
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                  value={token}
-                  onChange={e => setToken(e.target.value)}
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 font-code text-xs text-on-surface focus:outline-none focus:border-primary transition-colors placeholder-outline"
-                />
-                <p className="text-xs text-outline mt-1.5 leading-relaxed">
-                  GitHub → Settings → Developer settings → PAT → Tokens (classic) → No scopes needed for public repos.
-                </p>
-              </div>
-            )}
-          </div>
 
           {/* Error */}
           {error && (
@@ -405,7 +383,7 @@ function RepoHero({ meta, languages, techStack }) {
             <img src={meta.owner?.avatar_url} alt="" width={28} height={28} className="rounded-full border border-outline-variant" />
             <span className="text-on-surface-variant font-body text-sm">{meta.owner?.login} /</span>
             <h1 className="font-headline font-bold text-on-surface text-xl">{meta.name}</h1>
-            <span className="px-2 py-0.5 bg-tertiary-container text-on-tertiary-container rounded-full font-code text-xs">
+            <span className="px-2 py-0.5 border border-outline-variant text-on-surface-variant bg-transparent rounded-full font-code text-xs">
               {meta.private ? 'Private' : 'Public'}
             </span>
           </div>
@@ -583,7 +561,7 @@ function SemanticSearch({ context }) {
               onKeyDown={e => e.key === 'Enter' && search()}
             />
             <button onClick={() => search()} disabled={loading}
-              className="flex items-center gap-1.5 bg-[#2F81F7] hover:bg-[#2F81F7]/90 disabled:opacity-40 text-white text-xs font-bold px-4 py-2 rounded-md transition-colors flex-shrink-0">
+              className="flex items-center gap-1.5 bg-primary text-on-primary hover:brightness-95 disabled:opacity-40 text-xs font-bold px-4 py-2 rounded-md transition-all flex-shrink-0 shadow-sm">
               {loading ? <Spinner size={14} /> : <Icon name="search" className="text-base" />}
               Search
             </button>
@@ -720,7 +698,7 @@ function AIChat({ context }) {
           disabled={loading}
         />
         <button onClick={() => send()} disabled={loading || !input.trim()}
-          className="flex items-center gap-1.5 bg-[#2F81F7] hover:bg-[#2F81F7]/90 disabled:opacity-40 text-white text-sm font-bold px-4 py-2.5 rounded-lg transition-colors flex-shrink-0">
+          className="flex items-center gap-1.5 bg-primary text-on-primary hover:brightness-95 disabled:opacity-40 text-sm font-bold px-4 py-2.5 rounded-lg transition-all flex-shrink-0 shadow-sm">
           {loading ? <Spinner size={16} /> : <Icon name="send" className="text-base" />}
         </button>
       </div>
