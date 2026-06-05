@@ -247,8 +247,6 @@ const FEATURES = [
 
 function Landing({ onAnalyze, loading, loadStep, error, theme, toggleTheme }) {
   const [url, setUrl] = useState('')
-  const [token, setToken] = useState('')
-  const [showToken, setShowToken] = useState(false)
   return (
     <div className="flex flex-col items-center min-h-screen bg-background relative overflow-hidden">
       {/* Radial hero glow */}
@@ -301,10 +299,10 @@ function Landing({ onAnalyze, loading, loadStep, error, theme, toggleTheme }) {
               placeholder="https://github.com/organization/repository"
               value={url}
               onChange={e => setUrl(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && url.trim() && onAnalyze(url.trim(), token.trim())}
+              onKeyDown={e => e.key === 'Enter' && url.trim() && onAnalyze(url.trim())}
             />
             <button
-              onClick={() => url.trim() && onAnalyze(url.trim(), token.trim())}
+              onClick={() => url.trim() && onAnalyze(url.trim())}
               disabled={loading || !url.trim()}
               className="flex items-center gap-2 bg-primary text-on-primary hover:brightness-95 disabled:opacity-40 text-sm font-bold px-5 py-2.5 rounded-lg transition-all flex-shrink-0 shadow-sm"
             >
@@ -855,7 +853,7 @@ export default function App() {
 
   const ctx = repoMeta ? buildContext(repoMeta, techStack, rawTree, readme) : ''
 
-  const handleAnalyze = async (url, token) => {
+  const handleAnalyze = async (url) => {
     const parsed = parseGitHubUrl(url)
     if (!parsed) { setError('Please paste a valid GitHub URL — e.g. https://github.com/facebook/react'); return }
     setError(''); setLoading(true)
@@ -865,7 +863,7 @@ export default function App() {
     try {
       // ── Phase 1: fetch meta + languages (fast, ~300-600ms) ──────────────
       setLoadStep('Fetching repository…')
-      const { meta, languages: langs } = await fetchRepoMeta(parsed.owner, parsed.repo, token)
+      const { meta, languages: langs } = await fetchRepoMeta(parsed.owner, parsed.repo)
 
       // Compute tech stack from languages alone (no tree yet — enough for most detections)
       const partialStack = detectStack(langs, [])
@@ -881,7 +879,7 @@ export default function App() {
       setTab('overview')
 
       // Fire tree+readme fetch and AI summary in parallel
-      const detailsPromise = fetchRepoDetails(parsed.owner, parsed.repo, token)
+      const detailsPromise = fetchRepoDetails(parsed.owner, parsed.repo)
         .then(({ readme: rm, tree }) => {
           const stack = detectStack(langs, tree)
           setTechStack(stack)

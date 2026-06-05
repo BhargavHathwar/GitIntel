@@ -1,11 +1,11 @@
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
 // ── Phase 1: fast skeleton (meta + languages only, ~300-600ms) ──────────────
-export async function fetchRepoMeta(owner, repo, token = '') {
+export async function fetchRepoMeta(owner, repo) {
   const res = await fetch(`${BASE}/repo/meta`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner, repo, token }),
+    body: JSON.stringify({ owner, repo }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -15,11 +15,11 @@ export async function fetchRepoMeta(owner, repo, token = '') {
 }
 
 // ── Phase 2: tree + readme (runs after skeleton is visible) ─────────────────
-export async function fetchRepoDetails(owner, repo, token = '') {
+export async function fetchRepoDetails(owner, repo) {
   const res = await fetch(`${BASE}/repo/details`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner, repo, token }),
+    body: JSON.stringify({ owner, repo }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -29,11 +29,11 @@ export async function fetchRepoDetails(owner, repo, token = '') {
 }
 
 // ── Legacy single-call fetch (kept for fallback) ─────────────────────────────
-export async function fetchRepo(owner, repo, token = '') {
+export async function fetchRepo(owner, repo) {
   const res = await fetch(`${BASE}/repo`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner, repo, token }),
+    body: JSON.stringify({ owner, repo }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

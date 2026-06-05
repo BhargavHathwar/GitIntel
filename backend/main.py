@@ -13,7 +13,7 @@ from groq import Groq
 
 load_dotenv()
 
-app = FastAPI(title="GitIntel API", version="2.4.0")
+app = FastAPI(title="GitIntel API", version="2.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,7 +30,7 @@ app.add_middleware(
 )
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL   = "llama-3.3-70b-versatile"   # fast, free, generous quota
+GROQ_MODEL   = "llama-3.3-70b-versatile"
 GITHUB_API   = "https://api.github.com"
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
@@ -40,7 +40,6 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 class RepoRequest(BaseModel):
     owner: str
     repo:  str
-    token: Optional[str] = None
 
 class AIRequest(BaseModel):
     system:     str
@@ -49,18 +48,12 @@ class AIRequest(BaseModel):
 
 
 # ── GitHub helpers ────────────────────────────────────────────────────────────
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+def gh_headers() -> dict:
+    return {"Accept": "application/vnd.github.v3+json", "X-GitHub-Api-Version": "2022-11-28"}
 
-def gh_headers(token: Optional[str]) -> dict:
-    h = {"Accept": "application/vnd.github.v3+json", "X-GitHub-Api-Version": "2022-11-28"}
-    effective_token = token or GITHUB_TOKEN
-    if effective_token:
-        h["Authorization"] = f"Bearer {effective_token}"
-    return h
-
-async def gh_get(client: httpx.AsyncClient, path: str, token: Optional[str], timeout: float = 12):
+async def gh_get(client: httpx.AsyncClient, path: str, timeout: float = 12):
     try:
-        r = await client.get(f"{GITHUB_API}{path}", headers=gh_headers(token), timeout=timeout)
+        r = await client.get(f"{GITHUB_API}{path}", headers=gh_headers(), timeout=timeout)
         if r.status_code == 404:        return None, "not_found"
         if r.status_code in (403, 429): return None, "rate_limit"
         if not r.is_success:
@@ -81,15 +74,15 @@ async def health():
 @app.post("/api/repo/meta")
 async def fetch_repo_meta(req: RepoRequest):
     async with httpx.AsyncClient() as client:
-        meta, err = await gh_get(client, f"/repos/{req.owner}/{req.repo}", req.token)
+        meta, err = await gh_get(client, f"/repos/{req.owner}/{req.repo}")
         if err == "not_found":
             raise HTTPException(404, f'Repository "{req.owner}/{req.repo}" not found or is private.')
         if err == "rate_limit":
-            raise HTTPException(429, "GitHub API rate limit hit. Add a Personal Access Token in the app.")
+            raise HTTPException(429, "GitHub API rate limit reached. Please try again in a few minutes.")
         if err:
             raise HTTPException(502, f"GitHub API error: {err}")
 
-        langs, _ = await gh_get(client, f"/repos/{req.owner}/{req.repo}/languages", req.token)
+        langs, _ = await gh_get(client, f"/repos/{req.owner}/{req.repo}/languages")
         return {"meta": meta, "languages": langs or {}}
 
 
@@ -97,15 +90,15 @@ async def fetch_repo_meta(req: RepoRequest):
 @app.post("/api/repo/details")
 async def fetch_repo_details(req: RepoRequest):
     async with httpx.AsyncClient() as client:
-        meta, err = await gh_get(client, f"/repos/{req.owner}/{req.repo}", req.token, timeout=8)
+        meta, err = await gh_get(client, f"/repos/{req.owner}/{req.repo}", timeout=8)
         if err:
             raise HTTPException(502, f"GitHub API error: {err}")
 
         branch = meta.get("default_branch", "HEAD")
 
         (readme_raw, _), (tree_raw, _) = await asyncio.gather(
-            gh_get(client, f"/repos/{req.owner}/{req.repo}/readme", req.token, timeout=10),
-            gh_get(client, f"/repos/{req.owner}/{req.repo}/git/trees/{branch}?recursive=1", req.token, timeout=20),
+            gh_get(client, f"/repos/{req.owner}/{req.repo}/readme", timeout=10),
+            gh_get(client, f"/repos/{req.owner}/{req.repo}/git/trees/{branch}?recursive=1", timeout=20),
         )
 
         readme_text = ""
@@ -132,19 +125,19 @@ async def fetch_repo_details(req: RepoRequest):
 @app.post("/api/repo")
 async def fetch_repo(req: RepoRequest):
     async with httpx.AsyncClient() as client:
-        meta, err = await gh_get(client, f"/repos/{req.owner}/{req.repo}", req.token)
+        meta, err = await gh_get(client, f"/repos/{req.owner}/{req.repo}")
         if err == "not_found":
             raise HTTPException(404, f'Repository "{req.owner}/{req.repo}" not found or is private.')
         if err == "rate_limit":
-            raise HTTPException(429, "GitHub API rate limit hit. Add a Personal Access Token in the app.")
+            raise HTTPException(429, "GitHub API rate limit reached. Please try again in a few minutes.")
         if err:
             raise HTTPException(502, f"GitHub API error: {err}")
 
         branch = meta.get("default_branch", "HEAD")
         (langs, _), (readme_raw, _), (tree_raw, _) = await asyncio.gather(
-            gh_get(client, f"/repos/{req.owner}/{req.repo}/languages", req.token),
-            gh_get(client, f"/repos/{req.owner}/{req.repo}/readme", req.token),
-            gh_get(client, f"/repos/{req.owner}/{req.repo}/git/trees/{branch}?recursive=1", req.token),
+            gh_get(client, f"/repos/{req.owner}/{req.repo}/languages"),
+            gh_get(client, f"/repos/{req.owner}/{req.repo}/readme"),
+            gh_get(client, f"/repos/{req.owner}/{req.repo}/git/trees/{branch}?recursive=1"),
         )
 
         readme_text = ""
@@ -180,7 +173,6 @@ async def ai_stream(req: AIRequest):
 
     async def generate():
         try:
-            # Groq streaming runs synchronously in the SDK, so we run it in a thread
             loop = asyncio.get_event_loop()
 
             def stream_groq():
